@@ -1,7 +1,9 @@
 import { onCall, type CallableRequest } from 'firebase-functions/v2/https'
-import { defineSecret } from 'firebase-functions/params'
 import * as admin from 'firebase-admin'
-import { makeSyncRoster, extractInstructorGameId } from '@mygames/game-server'
+import {
+  makeSyncRoster, extractInstructorGameId,
+  callbackSecretName, callbackSecretParam, callbackSecretValue,
+} from '@mygames/game-server'
 import { templateGameDef } from './gameDefinition'
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -16,12 +18,13 @@ import { templateGameDef } from './gameDefinition'
 // override → blank To:. Step 2 is best-effort — it NEVER fails the roster sync.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const classroomCallbackSecret = defineSecret('CLASSROOM_CALLBACK_SECRET')
+// Derived from the game definition — the name is declared in exactly one place.
+const secretName = callbackSecretName(templateGameDef)
 const sharedSyncRoster = makeSyncRoster(templateGameDef)
 const isEmu = () => process.env.FUNCTIONS_EMULATOR === 'true'
 
 export const syncRoster = onCall(
-  { cors: templateGameDef.corsOrigins, secrets: [classroomCallbackSecret] },
+  { cors: templateGameDef.corsOrigins, secrets: [callbackSecretParam(secretName)] },
   async (request: CallableRequest) => {
     // 1. Participants — the shared handler, unchanged (same secret, same roster URL, same merge rules).
     const result = await sharedSyncRoster.run(request)
@@ -34,7 +37,7 @@ export const syncRoster = onCall(
       const gameInstanceId = await extractInstructorGameId(data, isEmu(), authHeader)
       const devData = isEmu() && data['_dev'] != null ? (data['_dev'] as Record<string, unknown>) : null
       const rosterUrl = String(devData?.['roster_url'] ?? process.env.CLASSROOM_ROSTER_URL ?? '')
-      const secret = String(devData?.['callback_secret'] ?? process.env.CLASSROOM_CALLBACK_SECRET ?? '')
+      const secret = callbackSecretValue(secretName, devData?.['callback_secret'] as string | undefined)
       if (rosterUrl && secret) {
         const res = await fetch(rosterUrl, {
           method: 'POST',

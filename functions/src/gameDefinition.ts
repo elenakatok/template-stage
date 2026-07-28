@@ -110,7 +110,21 @@ export const templateGameDef: GameDefinition = {
    * not either. A mismatch here is a 403 on every gradebook push, with a deploy that
    * reported success.
    */
-  classroom: { callbackSecretId: 'template_v1' },
+  classroom: {
+    callbackSecretId: 'template_v1',
+    /**
+     * The name of the callback secret in THIS GAME's own Firebase project.
+     *
+     * ⚠ MUST EQUAL `gameSecretName` for this game in `scripts/game-locations.json`, which
+     * is what `spawn-secret.sh` writes into Secret Manager and into
+     * `functions/.secret.local`. When the two disagree the deploy reports success and
+     * every gradebook push 403s in front of a class.
+     *
+     * ONE field. finalizeInstance, pushResultsToClassroom, syncRoster AND scoreAndRecord
+     * all read it, so they cannot disagree with each other — only with the manifest.
+     */
+    callbackSecretName: 'TEMPLATE_CALLBACK_SECRET',
+  },
 
   /**
    * Instructor Settings fields.

@@ -1,5 +1,4 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https'
-import { defineSecret } from 'firebase-functions/params'
 import * as admin from 'firebase-admin'
 import { FieldValue } from 'firebase-admin/firestore'
 import { computeZScoresByRole, isValidRole, type ScoringRecord, type Outcome } from '@mygames/game-engine'
@@ -11,18 +10,20 @@ import {
   type CompletedGroup,
   type GameResult,
   type PushSummary,
+  callbackSecretName, callbackSecretParam, callbackSecretValue,
 } from '@mygames/game-server'
 import { templateGameDef } from './gameDefinition'
 
-// Same per-game secret finalize uses, so the CLI provisions it for this function too.
-const classroomCallbackSecret = defineSecret('CLASSROOM_CALLBACK_SECRET')
+// The SAME per-game secret finalize uses, derived from the same field, so the CLI
+// provisions it for this function too and the two can never drift apart.
+const secretName = callbackSecretName(templateGameDef)
 
 /** Resolves the classroom callback URL + secret (prod env, with emulator _dev override). */
 function resolveCallbackConfig(data: Record<string, unknown>, isEmulator: boolean): { url: string; secret: string } {
   const dev = isEmulator && data['_dev'] != null ? (data['_dev'] as Record<string, unknown>) : null
   return {
     url: (dev?.['callback_url'] as string | undefined) ?? process.env.CLASSROOM_CALLBACK_URL ?? '',
-    secret: (dev?.['callback_secret'] as string | undefined) ?? process.env.CLASSROOM_CALLBACK_SECRET ?? '',
+    secret: callbackSecretValue(secretName, dev?.['callback_secret'] as string | undefined),
   }
 }
 
@@ -46,7 +47,7 @@ const def = templateGameDef
  * This is a per-game callable (mirrors updateGroupContract) so it deploys without a
  * game-server release and never touches grays.
  */
-export const scoreAndRecord = onCall({ cors: def.corsOrigins, secrets: [classroomCallbackSecret] }, async (request) => {
+export const scoreAndRecord = onCall({ cors: def.corsOrigins, secrets: [callbackSecretParam(secretName)] }, async (request) => {
   const data = request.data as Record<string, unknown>
   const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true'
   const authHeader = request.rawRequest.headers.authorization as string | undefined
