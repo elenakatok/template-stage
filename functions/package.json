@@ -1,0 +1,27 @@
+{
+  "name": "template-stage-functions",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "test": "vitest run",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "logs": "firebase functions:log"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "main": "lib/index.js",
+  "dependencies": {
+    "@mygames/game-engine": "git+https://github.com/elenakatok/game-engine.git#v0.7.0",
+    "@mygames/game-server": "git+https://github.com/elenakatok/game-server.git#v0.21.0",
+    "@mygames/stage-engine": "git+https://github.com/elenakatok/stage-engine.git#v0.3.0",
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^6.0.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
+    "typescript": "^5.3.3",
+    "vitest": "^2.0.0"
+  }
+}
