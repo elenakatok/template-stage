@@ -63,7 +63,13 @@ function parseArgs(argv) {
 }
 const args = parseArgs(process.argv.slice(2))
 const INSTANCE = args.instance
-const SEATS = Math.max(1, Math.min(16, Number(args.seats) || 2))
+/**
+ * ⚠ DEFAULT TO A WHOLE GROUP. Filling EVERY seat with a robot is what makes a game run
+ * unattended; one robot and an empty seat waits forever (online) or plays a game of
+ * defaults (classroom), and neither tests anything. Set GROUP_SIZE to this game's seats.
+ */
+const GROUP_SIZE = 2
+const SEATS = Math.max(1, Math.min(16, Number(args.seats) || GROUP_SIZE))
 const PACE = String(args.pace || 'watch')
 const LAUNCHER = String(args.launcher || 'http://localhost:5180').replace(/\/$/, '')
 const [SCREEN_W, SCREEN_H] = String(args.screen || '1920x1080').split('x').map(Number)
@@ -71,6 +77,13 @@ const [SCREEN_W, SCREEN_H] = String(args.screen || '1920x1080').split('x').map(N
 if (!INSTANCE || INSTANCE === true) {
   console.error('ERROR: --instance <gameInstanceId> is required.')
   process.exit(1)
+}
+
+if (SEATS % GROUP_SIZE !== 0) {
+  console.warn(
+    `WARNING: --seats ${SEATS} is not a multiple of the group size (${GROUP_SIZE}).\n` +
+    '         At least one group will be short a seat and will not finish on its own.',
+  )
 }
 
 /**
@@ -160,8 +173,32 @@ async function actInUi(page, action) {
 
 // ── the loop (SHARED — do not edit per game) ───────────────────────────────────
 
+/**
+ * Dismiss the round-results screen if it is up.
+ *
+ * ⚠ SHELL WORK, NOT A SLOT. `results-continue` is a FIXED test id on the shared
+ * RoundResultsScreen widget, so this is identical for every stage game.
+ *
+ * Without it an all-robot game stalls after round 1: the round has resolved server-side,
+ * but the results screen covers the decision controls so `actInUi` finds no button. In
+ * ONLINE mode nothing dismisses it but a click — there is no timer — so the run hangs
+ * indefinitely and looks like a game bug.
+ */
+async function dismissResultsIfShowing(page) {
+  const btn = page.locator('[data-testid="results-continue"]')
+  if (await btn.count() === 0) return false
+  if (await btn.isDisabled().catch(() => true)) return false
+  await btn.click().catch(() => {})
+  return true
+}
+
 async function runSeat(page, label) {
   for (;;) {
+    if (await dismissResultsIfShowing(page)) {
+      console.log(`[${label}] continued past the round result`)
+      await sleep(POLL_MS)
+      continue
+    }
     const view = await readSeatView(page)
     if (!view) { await sleep(POLL_MS); continue }
     if (view.status === 'finished') {
@@ -181,7 +218,8 @@ async function runSeat(page, label) {
 // ── main ───────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log(`Robot mode: ${SEATS} seat(s) on instance ${INSTANCE} (pace=${PACE})`)
+  console.log(`Robot mode: ${SEATS} seat(s) on instance ${INSTANCE} (pace=${PACE}) — ` +
+    `${SEATS / GROUP_SIZE} full group(s)`)
   const browsers = []
   const runs = []
 

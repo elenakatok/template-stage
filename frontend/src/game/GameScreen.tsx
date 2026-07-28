@@ -5,7 +5,7 @@ import {
 import type { AdvancePolicy } from '@mygames/game-ui'
 import {
   getRoundView, submitSignal, submitRespond, checkRoundClock,
-  type RoundViewResult, type SeatView, type DrawnState,
+  type RoundViewResult, type DrawnState,
 } from '../api'
 import HistoryTable from './HistoryTable'
 import ClockBar from './ClockBar'
@@ -78,6 +78,21 @@ export default function GameScreen({
     const t = setInterval(() => { void checkRoundClock(groupId).catch(() => {}) }, POLL_MS)
     return () => clearInterval(t)
   }, [data?.clock_enabled, groupId])
+
+  /**
+   * THE ROBOT'S READ PATH — exposed on EVERY branch, before any early return.
+   *
+   * ⚠ It used to be a child component rendered only in the decision branch, which meant
+   * `window.__gameState` went stale the moment the round-results screen appeared, and a
+   * fully-robot game stalled after round 1. A hook cannot live after a conditional
+   * return, so it goes here.
+   */
+  useEffect(() => {
+    if (!data) return
+    ;(window as unknown as Record<string, unknown>)['__gameState'] = {
+      view: data.view, participantId, gameInstanceId, groupId,
+    }
+  }, [data, participantId, gameInstanceId, groupId])
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true)
@@ -208,8 +223,6 @@ export default function GameScreen({
       <div style={{ marginTop: spacing.gapLg }}>
         <HistoryTable history={v.history} viewerRole={v.role} />
       </div>
-
-      <ExposeForRobot view={v} participantId={participantId} gameInstanceId={gameInstanceId} groupId={groupId} />
     </Shell>
   )
 }
@@ -248,18 +261,6 @@ function Choices({
       </div>
     </div>
   )
-}
-
-/**
- * The robot driver reads THIS — the same seat view the student sees, and nothing more.
- * That is what makes a browser bot honest: it cannot see a hidden field, because the
- * page never received one.
- */
-function ExposeForRobot(props: { view: SeatView; participantId: string; gameInstanceId: string; groupId: string }) {
-  useEffect(() => {
-    ;(window as unknown as Record<string, unknown>)['__gameState'] = props
-  }, [props])
-  return null
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
