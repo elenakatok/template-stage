@@ -8,9 +8,6 @@ import {
   makeGenerateAttendanceCode,
   makeVerifyAttendanceCode,
   makeGetRoster,
-  makeStartNegotiation,
-  makeSubmitLeadOutcome,
-  makeSubmitConfirmation,
   makeSubmitInstructorOutcome,
   makeFinalizeInstance,
   makePushResultsToClassroom,
@@ -57,9 +54,31 @@ export const getInfoUrls            = makeGetInfoUrls(templateGameDef)
 export { syncRoster } from './syncRoster'
 
 // ── outcome + finalize + gradebook ─────────────────────────────────────────────
-export const startNegotiation        = makeStartNegotiation(templateGameDef)
-export const submitLeadOutcome       = makeSubmitLeadOutcome(templateGameDef)
-export const submitConfirmation      = makeSubmitConfirmation(templateGameDef)
+/**
+ * ⚠ THE NEGOTIATION-FAMILY CALLABLES ARE DELIBERATELY NOT EXPORTED.
+ *
+ * `makeStartNegotiation`, `makeSubmitLeadOutcome` and `makeSubmitConfirmation` exist in
+ * @mygames/game-server for the NEGOTIATION family — a lead proposes a contract, the
+ * others ratify it. A stage game has no lead, no contract and no ratification: its flow
+ * is openRound → per-stage submissions → resolve.
+ *
+ * They were inherited here simply because the shared flow module exports them, and they
+ * are NOT inert — all three take STUDENT auth and would succeed against a real group
+ * doc, because a stage group is also `status: 'matched'` with a `lead_participant_id`.
+ * Deploying them means `roles/run.invoker` for `allUsers` on three outcome-writing
+ * endpoints the game never calls, and IAM persists across redeploys.
+ *
+ * No grade could change — scoring is participation-only and ignores the outcome — but
+ * "harmless" is not a reason to publish an endpoint with no caller.
+ *
+ * `submitInstructorOutcome` IS exported and IS required: the shared InstructorDashboard's
+ * deadlock-resolution control calls it, and it is what sets a group to `status:
+ * 'completed'` — which `finalizeInstance` guards on.
+ *
+ * ⚠ If a later slice adopts game-ui's shared `GroupReveal`, that component calls
+ * `startNegotiation` directly and this export must come back. This game uses its own
+ * local OnlineGroupReveal precisely to avoid that.
+ */
 export const submitInstructorOutcome = makeSubmitInstructorOutcome(templateGameDef)
 export const finalizeInstance        = makeFinalizeInstance(templateGameDef)
 export const pushResultsToClassroom  = makePushResultsToClassroom(templateGameDef)

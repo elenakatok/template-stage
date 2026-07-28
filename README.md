@@ -71,7 +71,13 @@ Steps are dependency-ordered; do not reorder them.
 5. **[YOU] Firestore database** — create the `(default)` database.
    *Missing → `syncRoster` fails with `PERMISSION_DENIED`.*
 6. **[YOU] Secret Manager API** — enable it.
-7. **[YOU] Authentication** — enable anonymous + custom token sign-in.
+7. **[YOU] Authentication** — Console → Authentication → **Get started**, and enable
+   **NO providers**. (It is under Security, not Build.)
+   ⚠ **Do not enable anonymous sign-in.** Students are signed in with
+   `signInWithCustomToken` via the classroom's `generateStudentToken`, which needs no
+   provider at all — it needs the step-9 `serviceAccountTokenCreator` grant. Verified
+   against a live game: `crisis-mygames-live` has no provider enabled and works.
+   Chasing a provider toggle is a dead end this README used to send people down.
 8. **[YOU] Register the web app**, then write `frontend/.env.production` from the config.
    ⚠ Not copied from the template — created fresh per game.
 9. **[YOU] IAM: `serviceAccountTokenCreator`** on the **compute** service account.
