@@ -69,7 +69,7 @@ export default function InstructorDashboard() {
   return (
     <>
       {/*
-        REPLACE_FROM_TEMPLATE. A real game usually portals a live control strip above
+        ⚠ PLACEHOLDER_GAME. A real game usually portals a live control strip above
         the shared dashboard (group status, the Start-class button, the online grouping
         panel). The template ships without one so the placeholder game runs on the
         shared dashboard alone and there is nothing game-specific to delete first.

@@ -10,7 +10,7 @@ import { getReportData, getRoundReport, type StudentRoundRow, type Role, type Re
 import { ALL_QUESTIONS } from '../../../functions/src/kcQuestions'
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// THE REPORTS PAGE (Reports Contract v2) — REPLACE_FROM_TEMPLATE.
+// THE REPORTS PAGE (Reports Contract v2) — ⚠ PLACEHOLDER_GAME series.
 //
 //   Tier 1a  ROSTER          one row per student, summary measures.  RosterReport
 //   Tier 1b  PER-STUDENT     that student's decisions, round by round.

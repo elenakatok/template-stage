@@ -11,7 +11,7 @@ import HistoryTable from './HistoryTable'
 import ClockBar from './ClockBar'
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// THE STUDENT GAME SCREEN — REPLACE_FROM_TEMPLATE.
+// THE STUDENT GAME SCREEN — ⚠ PLACEHOLDER_GAME.
 //
 // ⚠ THIS COMPONENT DECIDES NOTHING. It polls `getRoundView`, renders what came back,
 // and posts intents. It does not compute a payoff to "show the number sooner", does not

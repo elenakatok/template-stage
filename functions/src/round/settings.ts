@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// PLACEHOLDER round settings — REPLACE_FROM_TEMPLATE.
+// ⚠ PLACEHOLDER_GAME round settings.
 //
 // Every number a payoff, a draw or a legality rule depends on lives HERE, never as a
 // literal in spec.ts or resolver.ts. Two reasons, both learned the hard way:

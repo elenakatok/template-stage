@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// PLACEHOLDER payoff function — REPLACE_FROM_TEMPLATE.
+// ⚠ PLACEHOLDER_GAME payoff function.
 //
 // ⚠ THE ONE RULE OF THIS FILE: it is PURE. No firebase, no admin SDK, no Date, no
 // Math.random, no reads of anything outside its arguments. That is what lets the

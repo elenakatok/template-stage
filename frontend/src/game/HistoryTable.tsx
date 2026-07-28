@@ -2,7 +2,7 @@ import { HistoryTable as SharedHistoryTable, col, group, sub, num, colors } from
 import type { RoundRecord, Role } from '../api'
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// THE HISTORY TABLE — columns as DATA on the shared widget. REPLACE_FROM_TEMPLATE.
+// THE HISTORY TABLE — columns as DATA on the shared widget. ⚠ PLACEHOLDER_GAME columns.
 //
 // `col` / `group` / `sub` describe the columns; the widget owns the grouped headers,
 // the shading, the overflow wrapper and the empty state. Do not hand-write a <table>

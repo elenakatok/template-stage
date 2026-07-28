@@ -6,7 +6,7 @@ import { reviveState, toHistoryRows, roleOfSeat } from './round/machine'
 import type { StoredRoundRecord, GameRole } from './round/spec'
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// THE PER-ROUND REPORT — the data behind Tier 1b and Tier 3. REPLACE_FROM_TEMPLATE.
+// THE PER-ROUND REPORT — the data behind Tier 1b and Tier 3. ⚠ PLACEHOLDER_GAME rows.
 //
 // Tier 1a (the roster) comes from `getReportData`, which is generic and needs nothing
 // game-specific. THIS is the part no shared factory can supply: every game's round has

@@ -272,20 +272,47 @@ async function main() {
       '(L) firestore.rules denies the round-state collection BY NAME, not merely by default')
   }
 
-  // ── (E) the placeholder-content gate ─────────────────────────────────────────
+  // ── (E) the spawn gates ──────────────────────────────────────────────────────
   banner('(E) spawn hygiene')
   {
-    // Not a game assertion — a SPAWN assertion. It fails loudly in the template (where
-    // the markers are supposed to be there) only if someone deletes it, and fails in a
-    // spawned game until the markers are gone. See the README's "REPLACE_FROM_ grep".
-    let markers = 0
-    try {
-      markers = Number(execSync(
-        `grep -rl "REPLACE_FROM_" ${ROOT}/functions/src ${ROOT}/frontend/src | wc -l`,
-      ).toString().trim())
-    } catch { /* grep exits 1 on no match */ }
-    console.log(`  ℹ ${markers} file(s) still carry REPLACE_FROM_ markers.`)
-    check(true, '(E) marker count reported (a SPAWNED game must drive this to 0)')
+    const countIn = (marker) => {
+      try {
+        return Number(execSync(
+          `grep -rl "${marker}" ${ROOT}/functions/src ${ROOT}/frontend/src | wc -l`,
+        ).toString().trim())
+      } catch { return 0 }   // grep exits 1 when nothing matches
+    }
+
+    // ⚠ TWO MARKERS, TWO MEANINGS, TWO TREATMENTS.
+    //
+    //   REPLACE_FROM_TEMPLATE  unspawned IDENTITY — game_id, domain, secret name.
+    //                          A BLOCKER, asserted to zero in a spawned game.
+    //   PLACEHOLDER_GAME       the stand-in GAME — payoffs, stages, screens.
+    //                          SCHEDULED WORK, counted and reported, never asserted.
+    //
+    // They were ONE marker until the first real spawn, where the two demands collided:
+    // the Playbook gate must be zero before deploying, and a Part-1 spawn deliberately
+    // keeps the placeholder game. One marker forces a choice between a gate that fails
+    // the whole build (and gets ignored) and one silenced by deleting markers off
+    // unwritten code — which is how a gate stops meaning anything.
+    const identity = countIn('REPLACE_FROM_')
+    const placeholders = countIn('PLACEHOLDER_GAME')
+
+    // THE TEMPLATE ITSELF is supposed to carry identity markers — that is what makes it
+    // a template. So the assertion arms itself the moment the game is spawned, with no
+    // edit to this file: a spawned game has its own game_id and inherits a real gate.
+    const stillTheTemplate = PROJECT.startsWith('template-')
+
+    if (stillTheTemplate) {
+      console.log(`  ℹ ${identity} file(s) carry REPLACE_FROM_TEMPLATE — expected here; ` +
+                  'this becomes a hard gate the moment the game is spawned.')
+      check(identity > 0, '(E) the template still carries its identity markers (spawn has not run)')
+    } else {
+      check(identity === 0,
+        '(E) GATE: no REPLACE_FROM_ markers remain — identity is fully spawned')
+    }
+    console.log(`  ℹ ${placeholders} file(s) still carry PLACEHOLDER_GAME ` +
+                '(the template game, awaiting this game\'s own slices).')
   }
 
   banner(`RESULT — ${PASS} passed, ${FAIL} failed`)

@@ -1,5 +1,18 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// THE GAME, DECLARED — REPLACE_FROM_TEMPLATE.
+// THE GAME, DECLARED — ⚠ PLACEHOLDER_GAME.
+//
+// ── THE TWO MARKERS, AND WHY THERE ARE TWO ───────────────────────────────────
+//   REPLACE_FROM_TEMPLATE   unspawned IDENTITY — game_id, domain, secret name, prefix.
+//                           A BLOCKER. The Playbook gate asserts this to zero and the
+//                           harness fails the build until it is.
+//   PLACEHOLDER_GAME        the template's stand-in GAME — payoffs, stages, screens.
+//                           SCHEDULED WORK. Counted and reported, never asserted.
+//
+// They were one marker until the first real spawn, where the two demands collided: the
+// gate must be zero before deploying, and a Part-1 spawn deliberately keeps the
+// placeholder game. One marker forces a choice between a gate that fails for the whole
+// build (and gets ignored) and one silenced by deleting markers off unwritten code —
+// which is how a gate stops meaning anything. Keep them separate.
 //
 // This file DECLARES the game; @mygames/stage-engine RUNS it. Everything
 // game-specific — payoffs, draws, the default table, legality — is INJECTED here and

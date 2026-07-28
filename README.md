@@ -36,7 +36,7 @@ not run, that is a bug in the template, not a step you were meant to finish.
 
 ```
 functions/  @mygames/stage-engine  git tag v0.3.0   ← MUST be a git tag
-            @mygames/game-server   git tag v0.21.0  ← MUST be a git tag
+            @mygames/game-server   git tag v0.22.0  ← MUST be a git tag
             @mygames/game-engine   git tag v0.7.0   ← MUST be a git tag
 frontend/   @mygames/game-ui       file: symlink
             @mygames/game-engine   file: symlink
@@ -85,17 +85,35 @@ Steps are dependency-ordered; do not reorder them.
     root, the emulator reaches past it to the live Secret Manager — a real leak and a
     value mismatch at the same time.
 
-    **Before running `scripts/spawn-secret.sh`:** decide whether this game needs an entry
-    in `scripts/game-locations.json`.
-    - **Its own project** (the normal case): **no entry needed.** Absent games get the
-      default convention — project `<game>-mygames-live`, `gameSecretName`
-      `CLASSROOM_CALLBACK_SECRET`. Adding an entry that merely restates the defaults is
-      harmless; adding a *non-default* `gameSecretName` without binding that name
-      game-side breaks the game's own secret lookup.
-    - **A SHARED project** (the single-player family): **an entry with an explicit
-      `gameSecretName` is mandatory, before you run the script.** Several games' secrets
-      live in one project, and provisioning without a distinct name **rotates another
-      game's secret and breaks its gradebook push.**
+    **Before running `scripts/spawn-secret.sh`, add this game to
+    `scripts/game-locations.json`. This is NOT conditional on sharing a project.**
+
+    ```json
+    "<game>": {
+      "project": "<game>-mygames-live",
+      "functionsDir": "games/<game>/functions",
+      "gameSecretName": "<GAME>_CALLBACK_SECRET"
+    }
+    ```
+
+    ⚠ **The fallback is not a generic name.** A game with no entry is provisioned under
+    `CLASSROOM_CALLBACK_SECRET`, which is *pennies'* own secret name — kept as the
+    default only because the games that already bind it cannot be changed cheaply. "No
+    entry" therefore means "provisioned under another game's secret name".
+
+    `project` and `functionsDir` are not optional decoration: the script only reports
+    `manifest (game-locations.json)` when one of them is present, so a
+    `gameSecretName`-only entry silently prints *"default derivation"* while still
+    overriding the name. **If the banner says "default derivation", stop.**
+
+    ⚠ **`gameSecretName` MUST equal `classroom.callbackSecretName` in
+    `functions/src/gameDefinition.ts`** (see the traps table). The script writes one
+    name; the deployed functions bind whatever the code says. When they disagree, the
+    deploy reports success and every gradebook push 403s in front of a class.
+
+    For a game sharing a project (the single-player family) the entry is doubly
+    required: several games' secrets live in one project, and provisioning without a
+    distinct name **rotates a sibling game's secret**.
 
 ### Phase 2 — scaffold
 
@@ -130,8 +148,28 @@ Steps are dependency-ordered; do not reorder them.
     readable. Verified correct across all ten games on 2026-07-24; keep it that way.
 
 12. **[CC] Rename and rewrite.** `REPLACE_FROM_TEMPLATE` marks every site.
-    Set `game_id`, the collection prefix, `corsOrigins`, `callbackSecretId`, the roles,
-    the stages, the payoff, the settings, the questions.
+    Set `game_id`, the collection prefix, `corsOrigins`, `callbackSecretId`,
+    `callbackSecretName`, the roles, the stages, the payoff, the settings, the questions.
+
+    ⚠ **`firestore.rules` carries the collection prefix too, and it is not a
+    `.ts`/`.tsx`/`.json` file** — a rename pass scoped to source globs misses it, and the
+    round-state deny block silently keeps naming a collection that no longer exists.
+    Rename it explicitly, together with `ROUND_COLLECTION` in the round callables.
+
+    *(This was missed on the first real spawn. The leak assertion in section (L) of the
+    harness caught it, because it greps the rules text for the collection name rather
+    than assuming the collection is unreachable. Keep that assertion.)*
+
+    ### The two markers
+
+    | Marker | Means | Treatment |
+    |---|---|---|
+    | `REPLACE_FROM_TEMPLATE` | unspawned **identity** — `game_id`, domain, secret name, prefix | **A blocker.** The harness asserts it to zero the moment the game is spawned. |
+    | `PLACEHOLDER_GAME` | the template's stand-in **game** — payoffs, stages, screens, bot | **Scheduled work.** Counted and reported, never asserted. |
+
+    Keep them separate, and **never silence the second by deleting markers off unwritten
+    code** — a gate that goes green over a game nobody has written yet is worse than no
+    gate, because it is believed.
 
 13. **[CC] Build both layers clean**, run `template-round-loop.mjs`, run the frontend
     test suite. All three must be green before anything is deployed.
@@ -275,6 +313,8 @@ Steps are dependency-ordered; do not reorder them.
 | **Defaults charted as behaviour** | A biased Tier 3 line that just looks slightly wrong. `buildRoundSeries` excludes them by default. |
 | **A mirrored bot strategy** | Two copies and a drift test. There is one `decide()`, inside `functions/`. |
 | **Adding a config field** | "No recognised fields to update" on correct code — redeploy **both** `getGameConfig` and `updateGameConfig`. |
+| **Secret name mismatch** | Deploy reports success; every gradebook push 403s. `gameSecretName` in `game-locations.json` must equal `classroom.callbackSecretName` in `gameDefinition.ts`. One field feeds `finalizeInstance`, `pushResultsToClassroom` **and** `syncRoster`, so they cannot disagree with each other — only with the manifest. |
+| **`.rules` missed by a rename** | The round-state deny block names a dead collection. The harness's leak assertion catches it; do not weaken that assertion to "the collection is unreachable". |
 | **Stale deployed artefact** | "The code is right but the behaviour is old." Suspect the deployed thing — `lib/`, the bundle, `dist/` — before the source. |
 
 ## Running it

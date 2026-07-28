@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// THE QUESTION BANK — knowledge check, prep, and debrief. REPLACE_FROM_TEMPLATE.
+// THE QUESTION BANK — ⚠ PLACEHOLDER_GAME content.
 //
 // ⚠ THIS MODULE IMPORTS NOTHING, AND THAT IS DELIBERATE.
 //

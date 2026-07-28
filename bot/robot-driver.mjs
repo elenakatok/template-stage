@@ -120,7 +120,7 @@ async function readyUrlFor(seatIndex) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ▸ SLOT 1 — READ. REPLACE_FROM_TEMPLATE.
+// ▸ SLOT 1 — READ. ⚠ PLACEHOLDER_GAME.
 //
 // Turn the page's `window.__gameState` into whatever decide() takes. For the placeholder
 // game they are the same object, so this is the identity — a real game usually needs
@@ -134,7 +134,7 @@ async function readSeatView(page) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ▸ SLOT 2 — ACT. REPLACE_FROM_TEMPLATE.
+// ▸ SLOT 2 — ACT. ⚠ PLACEHOLDER_GAME.
 //
 // Turn an action from decide() into clicks. THROUGH THE UI — see the header.
 //

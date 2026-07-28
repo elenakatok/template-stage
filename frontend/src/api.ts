@@ -103,7 +103,7 @@ export const submitKnowledgeCheck = (data: object = {}) =>
 export const submitStaticKnowledgeCheckQuestion = (data: object = {}) =>
   callFn<{ ok: boolean; correct?: boolean }>('submitStaticKnowledgeCheckQuestion', data)
 
-// ── Round-loop API — REPLACE_FROM_TEMPLATE ────────────────────────────────────
+// ── Round-loop API — ⚠ PLACEHOLDER_GAME shapes ────────────────────────────────
 //
 // ⚠ THESE TYPES DESCRIBE A PAYLOAD, THEY DO NOT ENFORCE IT. The server decides what a
 // seat may see; this file only says what to expect. Widening a type here does not make
