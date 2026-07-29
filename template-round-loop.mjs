@@ -271,6 +271,47 @@ async function main() {
     check(['up', 'down'].includes(betaAfter.history[0].state),
       '(L) the truth is public in HISTORY once the round is over — privacy is within a round')
 
+    /*
+      ⚠ AND THE WHOLE ROW, NOT JUST THE REVEALED FIELD.
+
+      Every absence check above passes trivially if the field is never written at all:
+      "beta cannot see `state` mid-round" is equally true of a working reveal and of a
+      build that dropped the field on the floor. A spawned game shipped exactly that — a
+      Game-over screen with four blank columns and populated profits, because `profits`
+      was the only field name that survived a rename and the absence checks stayed green
+      throughout.
+
+      So a resolved row must be COMPLETE: every substantive field present and of a usable
+      type. Present-but-null and absent both render as a blank cell, so `in` alone is not
+      enough.
+
+      NEGATIVE CONTROL: `BLANK_HISTORY=1 node template-round-loop.mjs` strips the fields
+      and this check MUST fail. If it passes, the block is decoration.
+    */
+    {
+      let row = betaAfter.history[0]
+      if (process.env.BLANK_HISTORY === '1') {
+        row = { round: row.round, profits: row.profits, defaulted: row.defaulted }
+      }
+      const faults = []
+      const want = {
+        signal: (v) => v === 'up' || v === 'down',
+        state: (v) => v === 'up' || v === 'down',
+        quantity: (v) => typeof v === 'number',
+        sold: (v) => typeof v === 'number',
+        round: (v) => typeof v === 'number' && v > 0,
+      }
+      for (const [k, ok] of Object.entries(want)) {
+        if (!(k in row)) { faults.push(`${k} ABSENT`); continue }
+        if (!ok(row[k])) faults.push(`${k}=${JSON.stringify(row[k])}`)
+      }
+      if (!row.profits || typeof row.profits.alpha !== 'number' || typeof row.profits.beta !== 'number') {
+        faults.push('profits malformed')
+      }
+      check(faults.length === 0,
+        `(L) the resolved history row is COMPLETE — no blank columns${faults.length ? ' — ' + faults.join('; ') : ''}`)
+    }
+
     // Instructor surfaces are leak surfaces too — the dashboard is projected.
     const d = (await dash(gid)).result
     check(!JSON.stringify(d).includes('state_draw'),
