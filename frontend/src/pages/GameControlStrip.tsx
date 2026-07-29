@@ -3,51 +3,84 @@ import { colors, typography, spacing } from '@mygames/game-ui'
 import { getGameConfig, getGameDashboard, startAllGroups, openRound, type DashboardGroup } from '../api'
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// THE INSTRUCTOR'S GAME CONTROL STRIP — the "Start class" button and live status.
+// THE INSTRUCTOR'S GAME STRIP — "Start class" and live per-group status.
 //
-// ⚠ THIS COMPONENT EXISTS BECAUSE ITS ABSENCE SHIPPED A DEAD GAME.
+// ⚠ DELIBERATELY IDENTICAL TO CRISIS. Same heading, same green Start button, same
+// confirm, same result summary, same one-line-per-group status wording. An instructor
+// runs several of these games in a term; a control that looks different in each is a
+// control they have to re-learn. Where this file differs from crisis it is because the
+// feature does not exist here, and each such place says so.
 //
-// The shared InstructorDashboard knows nothing about a round loop. It matches groups and
-// then stops — there is no start control in it, and there cannot be, because "starting"
-// means something different in every family. A stage game must supply its own.
-//
-// The template shipped without one, on the reasoning that the placeholder game "runs on
-// the shared dashboard alone". It does not: `startAllGroups` was exported, deployed and
-// IAM-bound, and nothing on any screen invoked it. Students matched, then sat on "This
-// group has not started yet" forever, with no control anywhere for the instructor.
-//
-// A callable that exists and is deployed is not the same as a callable that is REACHABLE.
+// ⚠ THIS COMPONENT EXISTS BECAUSE ITS ABSENCE SHIPPED A DEAD GAME. The shared dashboard
+// matches groups and stops — it knows nothing about a round loop. A callable that exists
+// and is deployed is not the same as a callable that is REACHABLE.
 //
 // ── THE TWO MODES ────────────────────────────────────────────────────────────
 // CLASSROOM (clock on)  ONE re-pressable "Start class" button. Re-pressable is the point:
-//                       a later press starts the groups that became ready in the
-//                       meantime — the latecomer case — and leaves running groups alone.
-// ONLINE (clock off)    No button. Groups auto-open as their seats arrive, because there
-//                       is no instructor watching an online section. Showing a button
-//                       that must not be pressed is worse than showing none.
+//                       a later press starts groups that became ready since.
+// ONLINE (clock off)    No button. Groups auto-open as their seats arrive; there is no
+//                       instructor watching. A button that must not be pressed is worse
+//                       than no button.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const POLL_MS = 4000
-/** Seats per group — the group size this game matches to. */
+/** Seats per group. */
 const SEATS_PER_GROUP = 2
+
+/** Crisis's wording, verbatim in shape: one sentence per group. */
+function statusLine(g: DashboardGroup): string {
+  if (!g.started) return 'not started'
+  if (g.status === 'finished') return `finished — ${g.numRounds} rounds`
+  const waiting = (g.pending ?? 0) > 0 ? ` · waiting on ${g.pending} seat${g.pending === 1 ? '' : 's'}` : ''
+  return `Round ${g.round} of ${g.numRounds} · ${STAGE_LABEL[g.stage ?? ''] ?? g.stage}${waiting}`
+}
+
+const STAGE_LABEL: Record<string, string> = {
+  signal: 'Signalling',
+  respond: 'Responding',
+}
+
+function StartClass({ readyCount, onDone }: { readyCount: number; onDone: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [summary, setSummary] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const go = async () => {
+    if (readyCount === 0 || busy) return
+    if (!window.confirm(`Start the game for all ${readyCount} ready group${readyCount === 1 ? '' : 's'}?`)) return
+    setBusy(true); setErr(null)
+    try {
+      const r = await startAllGroups()
+      setSummary(`${r.started} started`)
+      onDone()
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Could not start the class.') }
+    setBusy(false)
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: spacing.gapSm }}>
+      <button
+        data-testid="start-class"
+        onClick={go}
+        disabled={busy || readyCount === 0}
+        title={readyCount === 0 ? 'No full groups are ready to start.' : `Start ${readyCount} ready group${readyCount === 1 ? '' : 's'}.`}
+        style={{ padding: '0.35rem 0.8rem', fontWeight: 700, cursor: busy || readyCount === 0 ? 'not-allowed' : 'pointer', borderRadius: 4, border: `1px solid ${colors.borderMid}`, background: readyCount === 0 ? colors.white : '#15803d', color: readyCount === 0 ? colors.textMuted : colors.white, opacity: readyCount === 0 ? 0.6 : 1 }}
+      >
+        {busy ? 'Starting…' : 'Start class'}
+      </button>
+      {summary && <span data-testid="start-class-summary" style={{ fontSize: typography.sizeXs, color: colors.textSecondary }}>{summary}</span>}
+      {err && <span data-testid="start-class-error" role="alert" style={{ fontSize: typography.sizeXs, color: '#b91c1c' }}>{err}</span>}
+    </span>
+  )
+}
 
 export default function GameControlStrip() {
   const [clockMode, setClockMode] = useState<string | null>(null)
   const [groups, setGroups] = useState<DashboardGroup[]>([])
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
-    try {
-      const d = await getGameDashboard()
-      setGroups(d.groups ?? [])
-      setError(null)
-    } catch (e) {
-      // A failure here must not blank the strip — the Start button is the thing that
-      // matters, and it stays usable while status is unavailable.
-      setError(e instanceof Error ? e.message : String(e))
-    }
+    try { setGroups((await getGameDashboard()).groups ?? []); setError(null) }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }, [])
 
   useEffect(() => {
@@ -59,19 +92,6 @@ export default function GameControlStrip() {
     return () => clearInterval(t)
   }, [refresh])
 
-  const start = async () => {
-    setBusy(true); setMsg(null); setError(null)
-    try {
-      const r = await startAllGroups()
-      setMsg(r.started > 0
-        ? `Started ${r.started} group${r.started === 1 ? '' : 's'}.`
-        : 'No groups were ready to start — match first, or they are already running.')
-      await refresh()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally { setBusy(false) }
-  }
-
   const startOne = async (groupId: string) => {
     setBusy(true); setError(null)
     try { await openRound(groupId); await refresh() }
@@ -80,113 +100,70 @@ export default function GameControlStrip() {
   }
 
   const online = clockMode === 'off'
-  const running = groups.filter((g) => g.started && g.status !== 'finished').length
-  const finished = groups.filter((g) => g.status === 'finished').length
-  // "Never started" = a group with no round document. Its students are still grouped,
-  // and therefore still count as participants at finalize.
-  const neverStarted = groups.filter((g) => !g.started).length
-  const neverStartedStudents = neverStarted * SEATS_PER_GROUP
+  const notStarted = groups.filter((g) => !g.started).length
+  const neverStartedStudents = notStarted * SEATS_PER_GROUP
 
   return (
-    <section
-      data-testid="game-control-strip"
-      style={{
-        margin: `${spacing.gapMd} 0`, padding: spacing.gapMd,
-        border: `1px solid ${colors.border ?? '#d0d7de'}`, borderRadius: 6,
-        fontFamily: typography.fontFamily,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.gapMd, flexWrap: 'wrap' }}>
-        <strong>The game</strong>
+    <div data-testid="game-control-strip"
+      style={{ margin: '0 0 1.5rem', padding: '0.75rem 1rem', border: `1px solid ${colors.borderMid}`, borderRadius: 8, background: colors.surfaceSubtle, fontFamily: typography.fontFamily }}>
 
-        {online ? (
-          <span data-testid="online-autostart-note" style={{ color: colors.textSecondary }}>
-            Online section — groups start automatically as their seats arrive. No button to press.
-          </span>
-        ) : (
-          <button
-            data-testid="start-class"
-            onClick={start}
-            disabled={busy}
-            style={{ padding: '0.4rem 1rem', fontWeight: 600, cursor: busy ? 'wait' : 'pointer' }}
-          >
-            {busy ? 'Starting…' : 'Start class'}
-          </button>
-        )}
-
-        <span data-testid="group-counts" style={{ color: colors.textSecondary }}>
-          {groups.length} group{groups.length === 1 ? '' : 's'} · {neverStarted} not started ·{' '}
-          {running} running · {finished} finished
-        </span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: spacing.gapMd, marginBottom: spacing.gapSm, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700, fontSize: '1.05rem' }}>Groups</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: spacing.gapMd }}>
+          {!online && groups.length > 0 && <StartClass readyCount={notStarted} onDone={refresh} />}
+          {online && (
+            <span data-testid="online-autostart-note" style={{ fontSize: typography.sizeXs, color: colors.textSecondary }}>
+              Online — groups start automatically as their seats arrive.
+            </span>
+          )}
+        </div>
       </div>
 
       {/*
-        ⚠ THE GRADING CONSEQUENCE, SHOWN BEFORE IT IS LOCKED IN.
-        Group membership means participation: a student in a group that never started is
-        still scored as a participant. That is the instructor's rule — ungrouping is how
-        a no-show is declared — but a forgotten ungroup is silent, so it is said out loud
-        here and again on finalize.
+        ⚠ THE GRADING CONSEQUENCE, SHOWN BEFORE IT IS LOCKED IN. Group membership means
+        participation: a student in a group that never started is still scored as a
+        participant. That is the instructor's rule — ungrouping is how a no-show is
+        declared — but a forgotten ungroup is silent, so it is said here and on finalize.
       */}
-      {neverStartedStudents > 0 && (
+      {neverStartedStudents > 0 && groups.length > 0 && (
         <p data-testid="never-started-warning"
-          style={{ margin: `${spacing.gapSm} 0 0`, padding: spacing.gapSm, borderRadius: 4,
+          style={{ margin: `0 0 ${spacing.gapSm}`, padding: spacing.gapSm, borderRadius: 4, fontSize: typography.sizeSm,
                    background: '#fef3c7', border: '1px solid #f59e0b' }}>
-          <strong>{neverStarted} group{neverStarted === 1 ? '' : 's'} never started</strong>
-          {' '}— {neverStartedStudents} student{neverStartedStudents === 1 ? '' : 's'}.
-          {' '}They will be scored as <strong>participants</strong> unless you ungroup them
-          first. Ungrouped students score −2 and are left out of the class average.
+          <strong>{notStarted} group{notStarted === 1 ? '' : 's'} not started</strong> — {neverStartedStudents} student
+          {neverStartedStudents === 1 ? '' : 's'}. They will be scored as <strong>participants</strong> unless you
+          ungroup them first. Ungrouped students score −2 and are left out of the class average.
         </p>
       )}
 
-      {msg && <p data-testid="start-result" style={{ margin: `${spacing.gapSm} 0 0` }}>{msg}</p>}
-      {error && <p role="alert" data-testid="control-error" style={{ color: '#b91c1c', margin: `${spacing.gapSm} 0 0` }}>{error}</p>}
-
-      {groups.length > 0 && (
-        <table data-testid="group-status" style={{ marginTop: spacing.gapSm, borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-          <thead>
-            <tr style={{ textAlign: 'left', color: colors.textSecondary }}>
-              <th style={{ padding: '0.2rem 0.75rem 0.2rem 0' }}>Group</th>
-              <th style={{ padding: '0.2rem 0.75rem 0.2rem 0' }}>Round</th>
-              <th style={{ padding: '0.2rem 0.75rem 0.2rem 0' }}>Stage</th>
-              <th style={{ padding: '0.2rem 0.75rem 0.2rem 0' }}>Waiting on</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map((g) => (
-              <tr key={g.group_id} data-testid={`group-row-${g.groupNumber}`}>
-                <td style={{ padding: '0.2rem 0.75rem 0.2rem 0' }}>{g.groupNumber}</td>
-                <td style={{ padding: '0.2rem 0.75rem 0.2rem 0' }}>
-                  {g.started ? `${g.round} of ${g.numRounds ?? '?'}` : '—'}
-                </td>
-                <td style={{ padding: '0.2rem 0.75rem 0.2rem 0' }}>
-                  {g.status === 'finished' ? 'finished' : (g.stage ?? '—')}
-                </td>
-                <td style={{ padding: '0.2rem 0.75rem 0.2rem 0' }}>
-                  {g.started && g.status !== 'finished' ? `${g.pending ?? 0} seat(s)` : '—'}
-                </td>
-                <td>
-                  {/*
-                    Per-group start, for the one group that did not come up with the rest.
-                    Deliberately NOT the main control — "Start class" is. This is the
-                    escape hatch, and it is why `openRound` is exported at all.
-                  */}
-                  {!g.started && !online && (
-                    <button
-                      data-testid={`start-group-${g.groupNumber}`}
-                      onClick={() => startOne(g.group_id)}
-                      disabled={busy}
-                      style={{ fontSize: '0.8rem', padding: '0.15rem 0.5rem' }}
-                    >
-                      Start this group
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {groups.length === 0 ? (
+        <div style={{ fontSize: typography.sizeSm, color: colors.textSecondary }}>
+          {online ? 'Press “Group participants” to form groups.' : 'Match students into groups to begin.'}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.gapSm }}>
+          {groups.map((g) => (
+            <div key={g.group_id} data-testid={`group-row-${g.groupNumber}`}
+              style={{ display: 'flex', alignItems: 'center', gap: spacing.gapMd, paddingBottom: '0.4rem', borderBottom: `1px solid ${colors.borderFaint}`, flexWrap: 'wrap' }}>
+              <span style={{ minWidth: 70, fontWeight: 600 }}>Group {g.groupNumber}</span>
+              <span style={{ fontSize: typography.sizeSm, color: g.started && g.status !== 'finished' ? colors.successText : colors.textSecondary }}>
+                {g.started && g.status !== 'finished' && '● '}{statusLine(g)}
+              </span>
+              {/*
+                NOT IN CRISIS: a per-group start, for the one group that did not come up
+                with the rest. Crisis has no equivalent because its live view carries the
+                per-group actions. Kept — it is the escape hatch, and the reason openRound
+                is exported at all.
+              */}
+              {!g.started && !online && (
+                <button data-testid={`start-group-${g.groupNumber}`} onClick={() => startOne(g.group_id)} disabled={busy}
+                  style={{ fontSize: typography.sizeXs, padding: '0.15rem 0.5rem' }}>Start this group</button>
+              )}
+            </div>
+          ))}
+        </div>
       )}
-    </section>
+
+      {error && <p role="alert" data-testid="control-error" style={{ color: '#b91c1c', fontSize: typography.sizeXs, margin: `${spacing.gapSm} 0 0` }}>{error}</p>}
+    </div>
   )
 }
