@@ -136,6 +136,21 @@ export default function Reports() {
       padding: layout.pagePad, maxWidth: layout.maxWidth,
       margin: '0 auto', fontFamily: typography.fontFamily,
     }}>
+      {/*
+        ⚠ THE WAY BACK. Infoshare shipped a Reports page with no route to the dashboard
+        but the browser's Back button; crisis, eBay and SAA all carry this. The query
+        string is carried over WHOLE because the instructor's identity lives in it
+        (`token` + `game_instance_id` in production, `_dev_game_instance_id` locally) —
+        a bare href lands on a dashboard with no session.
+      */}
+      <button
+        data-testid="reports-back-to-dashboard"
+        onClick={() => { window.location.href = `/dashboard${window.location.search}` }}
+        style={{ background: 'none', border: '1px solid #ccc', borderRadius: 4,
+                 padding: '0.3rem 0.8rem', cursor: 'pointer', fontSize: '0.85rem',
+                 marginBottom: '0.75rem' }}
+      >← Dashboard</button>
+
       <h1>Reports</h1>
 
       <Section title="Tier 1a — roster">
