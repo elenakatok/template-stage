@@ -180,6 +180,32 @@ Steps are dependency-ordered; do not reorder them.
 13. **[CC] Build both layers clean**, run `template-round-loop.mjs`, run the frontend
     test suite. All three must be green before anything is deployed.
 
+    ### The declared-secret check — run it before every first deploy
+
+    ```
+env -C <abs>/games/<game>/functions node -e "const p=require('firebase-functions/params');const d=[];const o=p.defineSecret;p.defineSecret=n=>{d.push(n);return o(n)};require('./lib/index.js');console.log([...new Set(d)].join('\n'))"
+    ```
+
+    It must print the game's **own** secret name and **nothing else**. If
+`CLASSROOM_CALLBACK_SECRET` appears for a game that declared its own name, stop — the
+    deploy will halt and interactively offer to create a secret that does not exist in that
+    project.
+
+    ⚠ **THIS IS A NEW CLASS OF CHECK, NOT A VARIATION ON THE DIST CHECK.** The dist check
+asks *which name does the resolver CHOOSE* — `callbackSecretName(def)`, the compiled
+factory calling the right function, no function binding the wrong name. This one asks
+*which params does loading the bundle DECLARE*.
+
+They are different sets, and **only the declared set is what the Firebase CLI acts on**:
+it enumerates every param declared anywhere in the loaded module graph, not just those a
+function's `secrets: []` binds. A module-load side effect — an import that calls
+`defineSecret` for its own reasons — adds to the declared set without changing what any
+resolver returns. No amount of resolver checking can see it.
+
+This is not hypothetical. It cost a halted deploy on infoshare's first attempt, with
+every resolver-level check passing at the time and still passing afterwards.
+
+
 ### Phase 3 — register with the classroom
 
 14. **[CC] Registry** — edit **only** `classroom/game-registry.json`. The two
