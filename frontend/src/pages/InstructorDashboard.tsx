@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { InstructorDashboard as SharedDashboard, type DeadlockResolutionProps, type OutcomeFields } from '@mygames/game-ui'
 import { auth, functions, rtdb } from '../firebase'
 import { submitInstructorOutcome } from '../api'
+import GameControlStrip from './GameControlStrip'
 import { templateRoleConfig } from '../gameConfig'
 
 // ── Role labels from game config (SINGLE matching role — `player`) ─────────────
@@ -69,11 +70,18 @@ export default function InstructorDashboard() {
   return (
     <>
       {/*
-        ⚠ PLACEHOLDER_GAME. A real game usually portals a live control strip above
-        the shared dashboard (group status, the Start-class button, the online grouping
-        panel). The template ships without one so the placeholder game runs on the
-        shared dashboard alone and there is nothing game-specific to delete first.
+        ⚠ THE START CONTROL LIVES HERE, NOT IN THE SHARED DASHBOARD.
+        The shared dashboard matches groups and then stops — it knows nothing about a
+        round loop and cannot, because "starting" differs per family. A stage game MUST
+        ship its own start control.
+
+        The template used to ship without one, reasoning that the placeholder game "runs
+        on the shared dashboard alone". It does not: the first spawn matched groups and
+        dead-ended, students stuck on "This group has not started yet" with no control
+        anywhere. `startAllGroups` was exported, deployed and IAM-bound the whole time —
+        a callable that exists is not a callable that is REACHABLE.
       */}
+      <GameControlStrip />
       <SharedDashboard
         title="Instructor Dashboard — Template Stage Game"
         roleLabels={roleLabels}

@@ -211,6 +211,57 @@ export const openRound = onCall(CORS, async (request) => {
  * two modes drift apart. `openRoundCore` above is what that factory injects.
  */
 
+
+// ── ONLINE AUTO-OPEN ───────────────────────────────────────────────────────────
+
+/**
+ * Record a seat's ARRIVAL and, once every human seat has arrived, open round 1.
+ *
+ * ⚠ WITHOUT THIS, ONLINE MODE CANNOT START AT ALL. There is no instructor watching an
+ * online section, so there is no button: a group begins when its people turn up. The
+ * classroom "Start class" control does not help — pressing it is exactly what nobody is
+ * there to do.
+ *
+ * The template shipped without it and the gap was invisible, because the classroom path
+ * has a button and the emulator harness seeded past both. An end-to-end online run is
+ * the only thing that shows it.
+ *
+ * Called from `getRoundView` — the moment a student's game screen first polls, which IS
+ * "the student has arrived". A no-op in classroom mode (the clock is on) and a no-op for
+ * a group that has already opened, so it is safe to call on every poll.
+ *
+ * `arrived[]` also feeds the assignment-status report: it is written with `arrayUnion`,
+ * and group creation initialises it to `[]` (game-server ≥ 0.22.0) so a group nobody has
+ * reached yet reports "0 arrived" rather than "not recorded".
+ */
+async function maybeAutoOpen(iid: string, groupId: string, participantId: string, clockNow: number): Promise<void> {
+  const instanceRef = admin.firestore().collection('game_instances').doc(iid)
+  const [groupSnap, configSnap] = await Promise.all([
+    instanceRef.collection('groups').doc(groupId).get(),
+    instanceRef.collection('config').doc('main').get(),
+  ])
+  if (!groupSnap.exists) return
+  // Clock ON means classroom, which starts by button. Nothing to do.
+  if (((configSnap.data() ?? {})['clock_mode'] ?? 'on') !== 'off') return
+
+  const g = groupSnap.data() as Record<string, unknown>
+  const players = (g['player_participants'] as string[] | undefined) ?? []
+  const botPids = new Set((g['bot_participants'] as string[] | undefined) ?? [])
+  if (players.length !== GROUP_SIZE) return   // a short group waits for a seat, not a poll
+
+  await instanceRef.collection('groups').doc(groupId)
+    .set({ arrived: FieldValue.arrayUnion(participantId) }, { merge: true })
+
+  const fresh = (await instanceRef.collection('groups').doc(groupId).get()).data() as Record<string, unknown>
+  const arrived = new Set((fresh['arrived'] as string[] | undefined) ?? [])
+  // Bots are always "present" — they are filled at formation and never log in.
+  const everyHumanHere = players.filter((p) => !botPids.has(p)).every((h) => arrived.has(h))
+  if (!everyHumanHere) return
+
+  // Idempotent: a delayed arrival must never reset a group that already progressed.
+  await openRoundCore(iid, groupId, { nowMs: clockNow, idempotent: true })
+}
+
 // ── the action core (bot seam #1) ──────────────────────────────────────────────
 
 /**
@@ -329,8 +380,17 @@ async function runClock(iid: string, groupId: string, clockNow: number) {
  */
 export const getRoundView = onCall(CORS, async (request) => {
   const data = request.data as Record<string, unknown>
-  const { iid, groupId, seat } = await seatOfCaller(data, request)
+  const { participantId, gameInstanceId } = await extractStudentOnCallIds(data, isEmu(), authHeaderOf(request))
+  const groupIdArg = String(data['group_id'] ?? '')
   const clockNow = nowMs(data)
+
+  // ONLINE: reaching the game screen IS arriving. Record it and open round 1 once every
+  // human seat is here. No-op in classroom mode. Must run BEFORE seatOfCaller, which
+  // throws "this group has not started yet" on a group that has not opened — which is
+  // precisely the state auto-open exists to leave.
+  if (groupIdArg) await maybeAutoOpen(gameInstanceId, groupIdArg, participantId, clockNow)
+
+  const { iid, groupId, seat } = await seatOfCaller(data, request)
   await runClock(iid, groupId, clockNow)
 
   const settings = await settingsFor(iid)
