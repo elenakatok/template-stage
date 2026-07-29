@@ -197,6 +197,7 @@ async function dismissResultsIfShowing(page) {
 }
 
 async function runSeat(page, label) {
+  let actionsTaken = 0
   for (;;) {
     if (await dismissResultsIfShowing(page)) {
       console.log(`[${label}] continued past the round result`)
@@ -206,7 +207,32 @@ async function runSeat(page, label) {
     const view = await readSeatView(page)
     if (!view) { await sleep(POLL_MS); continue }
     if (view.status === 'finished') {
-      console.log(`[${label}] game over`)
+      /*
+        ⚠ FINISHED WITHOUT HAVING PLAYED IS A FAILURE, NOT A FINISH.
+
+        This used to return quietly, and the run then printed "All seats finished" and
+        exited 0 — having taken ZERO actions. A robot run against an instance that was
+        already played reported success while doing nothing at all, which is exactly the
+        shape of every false green in this build: the exit condition was equally true of
+        the working case and the broken one.
+
+        It is a real situation, not a hypothetical: two course-ABC instances still held
+        FINISHED round documents from an earlier placeholder-era run, so seats arriving
+        on them saw `status: 'finished'` on their very first poll. The gate looked like a
+        driver bug for an hour, and was stale data.
+
+        So distinguish the two, and fail loudly on the one that proves nothing.
+      */
+      if (actionsTaken === 0) {
+        console.error(
+          `[${label}] ✗ THE GAME WAS ALREADY OVER WHEN THIS SEAT ARRIVED — no rounds were ` +
+          `played by this robot.\n` +
+          `        The instance already holds a FINISHED round document for this group, ` +
+          `almost certainly from an earlier run.\n` +
+          `        Use a fresh instance. Reporting failure rather than a silent success.`)
+        throw new Error(`${label}: game already finished on arrival (0 actions taken)`)
+      }
+      console.log(`[${label}] game over — ${actionsTaken} action(s) taken`)
       return
     }
     if (!view.owes) { await sleep(POLL_MS); continue }
@@ -215,6 +241,7 @@ async function runSeat(page, label) {
     const action = decide(view, S)
     console.log(`[${label}] round ${view.round} ${view.stage} → ${JSON.stringify(action)}`)
     await actInUi(page, action)
+    actionsTaken++
     await sleep(POLL_MS)
   }
 }

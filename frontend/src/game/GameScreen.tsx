@@ -41,6 +41,7 @@ export default function GameScreen({
 }: { participantId: string; gameInstanceId: string; groupId: string }) {
   const [data, setData] = useState<RoundViewResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notStartedYet, setNotStartedYet] = useState(false)
   const [busy, setBusy] = useState(false)
   /** The round whose result screen is showing, or null when playing. */
   const [showingResultFor, setShowingResultFor] = useState<number | null>(null)
@@ -58,6 +59,8 @@ export default function GameScreen({
       }
       lastSeenRound.current = completed
     } catch (e) {
+      const code = (e as { code?: string })?.code ?? ''
+      setNotStartedYet(code === 'functions/not-found')
       setError(e instanceof Error ? e.message : String(e))
     }
   }, [groupId])
@@ -109,7 +112,31 @@ export default function GameScreen({
     }
   }
 
-  if (error && !data) return <Shell><p role="alert">{error}</p></Shell>
+  /*
+    ⚠ "NOT STARTED YET" IS A NORMAL STATE, NOT AN ERROR.
+    A student reaches this screen when they are MATCHED, which is before the instructor
+    presses Start — every classroom session has that gap. getRoundView correctly throws
+    not-found for a group with no round document, and rendering that as role="alert" made
+    the normal wait before every game look like a failure.
+
+    Matched on the CODE, not the message: the sentence is server-authored and will be
+    reworded. Anything else still surfaces verbatim — a real failure must never be
+    softened into a waiting screen.
+  */
+  if (error && !data) {
+    if (notStartedYet) {
+      return (
+        <Shell>
+          <h1 style={{ marginTop: 0 }}>Waiting to begin</h1>
+          <p data-testid="not-started-yet">
+            You are in a group. The game will start when your instructor begins the
+            session — this screen will move on by itself.
+          </p>
+        </Shell>
+      )
+    }
+    return <Shell><p role="alert">{error}</p></Shell>
+  }
   if (!data) return <Shell><p>Loading…</p></Shell>
 
   const v = data.view
