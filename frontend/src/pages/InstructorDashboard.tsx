@@ -119,13 +119,13 @@ export default function InstructorDashboard() {
         scoreAndRecord={{ callableName: 'scoreAndRecord', label: 'Score & Record' }}
         beforeFinalize={confirmFinalize}
         /*
-          BELOW the roster, via the shared slot — not portaled above it.
-          The roster is the headline an instructor reads first; the game's own controls
-          and per-group status belong under it. Games written before `belowRoster`
-          existed portal to `main.firstChild` because that was the only anchor a portal
-          could reach, which is how "above" became the default by accident.
+          Directly under the headline and above the roster, via the shared slot.
+          The roster is long: on a full class, controls placed below it are off-screen.
+          crisis and eBay sit in the same region but get there by portaling into another
+          component's DOM — right place, fragile means. The slot is the same position
+          declared rather than reached for.
         */
-        belowRoster={<GameControlStrip />}
+        underHeadline={<GameControlStrip />}
       />
     </>
   )
