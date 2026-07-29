@@ -106,19 +106,6 @@ async function confirmFinalize(): Promise<boolean> {
 export default function InstructorDashboard() {
   return (
     <>
-      {/*
-        ⚠ THE START CONTROL LIVES HERE, NOT IN THE SHARED DASHBOARD.
-        The shared dashboard matches groups and then stops — it knows nothing about a
-        round loop and cannot, because "starting" differs per family. A stage game MUST
-        ship its own start control.
-
-        The template used to ship without one, reasoning that the placeholder game "runs
-        on the shared dashboard alone". It does not: the first spawn matched groups and
-        dead-ended, students stuck on "This group has not started yet" with no control
-        anywhere. `startAllGroups` was exported, deployed and IAM-bound the whole time —
-        a callable that exists is not a callable that is REACHABLE.
-      */}
-      <GameControlStrip />
       <SharedDashboard
         title="Instructor Dashboard — Template Stage Game"
         roleLabels={roleLabels}
@@ -131,6 +118,14 @@ export default function InstructorDashboard() {
         reportsRoute="/reports"
         scoreAndRecord={{ callableName: 'scoreAndRecord', label: 'Score & Record' }}
         beforeFinalize={confirmFinalize}
+        /*
+          BELOW the roster, via the shared slot — not portaled above it.
+          The roster is the headline an instructor reads first; the game's own controls
+          and per-group status belong under it. Games written before `belowRoster`
+          existed portal to `main.firstChild` because that was the only anchor a portal
+          could reach, which is how "above" became the default by accident.
+        */
+        belowRoster={<GameControlStrip />}
       />
     </>
   )
