@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { SEATS_PER_GROUP } from '../groupSize'
 import { colors, typography, spacing } from '@mygames/game-ui'
 import OnlineMatchControl, { GROUP_BUTTON_LABEL } from './OnlineMatchControl'
@@ -78,10 +78,41 @@ export default function GameControlStrip() {
   const [groups, setGroups] = useState<DashboardGroup[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  /**
+   * ⚠ HAS THIS PANEL EVER LOADED? "Missing token" is a NORMAL state, not a fault.
+   *
+   * The panel mounts and polls immediately, before the instructor's Firebase session has
+   * been established, so the first call or two throw `invalid-argument: Missing token`.
+   * Rendering that verbatim put a RED ERROR on the production dashboard every time Elena
+   * opened it, on a page that was working — it then vanished a second later. Same class
+   * as the pre-Start "This group has not started yet" alert: a normal state shown as a
+   * fault.
+   *
+   * ⚠ KEYED ON THE CONDITION, NOT THE MESSAGE. Matching the string "Missing token" would
+   * break the moment it is reworded, and would also swallow a genuinely broken session
+   * that happens to say the same thing. The condition is: we have NEVER successfully
+   * loaded, and only briefly. Before the first success, a few failures are the session
+   * still coming up; past that, whatever is failing is real and is shown verbatim.
+   */
+  const [everLoaded, setEverLoaded] = useState(false)
+  const failures = useRef(0)
+
+  /** Failures tolerated before the first success — about six seconds at POLL_MS. */
+  const STARTUP_GRACE = 4
+
   const refresh = useCallback(async () => {
-    try { setGroups((await getGameDashboard()).groups ?? []); setError(null) }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
-  }, [])
+    try {
+      setGroups((await getGameDashboard()).groups ?? [])
+      setError(null)
+      setEverLoaded(true)
+      failures.current = 0
+    } catch (e) {
+      failures.current += 1
+      const msg = e instanceof Error ? e.message : String(e)
+      // Still starting up: stay quiet. Persistent, or after a good load: it is real.
+      if (everLoaded || failures.current > STARTUP_GRACE) setError(msg)
+    }
+  }, [everLoaded])
 
   useEffect(() => {
     void (async () => {
@@ -128,7 +159,11 @@ export default function GameControlStrip() {
         </p>
       )}
 
-      {groups.length === 0 ? (
+      {!everLoaded && !error ? (
+        <div data-testid="control-strip-loading" style={{ fontSize: typography.sizeSm, color: colors.textSecondary }}>
+          Connecting…
+        </div>
+      ) : groups.length === 0 ? (
         <div style={{ fontSize: typography.sizeSm, color: colors.textSecondary }}>
           {online ? `Press “${GROUP_BUTTON_LABEL}” to form groups.` : 'Match students into groups to begin.'}
         </div>
