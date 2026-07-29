@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { colors, typography, spacing } from '@mygames/game-ui'
-import { getGameConfig, getGameDashboard, startAllGroups, openRound, type DashboardGroup } from '../api'
+import { getGameConfig, getGameDashboard, startAllGroups, type DashboardGroup } from '../api'
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // THE INSTRUCTOR'S GAME STRIP — "Start class" and live per-group status.
@@ -75,7 +75,6 @@ function StartClass({ readyCount, onDone }: { readyCount: number; onDone: () => 
 export default function GameControlStrip() {
   const [clockMode, setClockMode] = useState<string | null>(null)
   const [groups, setGroups] = useState<DashboardGroup[]>([])
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
@@ -91,13 +90,6 @@ export default function GameControlStrip() {
     const t = setInterval(() => { void refresh() }, POLL_MS)
     return () => clearInterval(t)
   }, [refresh])
-
-  const startOne = async (groupId: string) => {
-    setBusy(true); setError(null)
-    try { await openRound(groupId); await refresh() }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)) }
-    finally { setBusy(false) }
-  }
 
   const online = clockMode === 'off'
   const notStarted = groups.filter((g) => !g.started).length
@@ -149,15 +141,16 @@ export default function GameControlStrip() {
                 {g.started && g.status !== 'finished' && '● '}{statusLine(g)}
               </span>
               {/*
-                NOT IN CRISIS: a per-group start, for the one group that did not come up
-                with the rest. Crisis has no equivalent because its live view carries the
-                per-group actions. Kept — it is the escape hatch, and the reason openRound
-                is exported at all.
+                ⚠ NO PER-GROUP START BUTTON, AND DO NOT ADD ONE BACK.
+                It looks like the obvious escape hatch for the group that was not ready
+                when the class began — but "Start class" already IS that escape hatch.
+                It is re-pressable by design: `makeStartAllGroups` skips every group that
+                is already running (`already_running`) and every group still short a seat
+                (`skipped_short`), and opens only the ones that have become ready since.
+                Pressing it again after a latecomer arrives starts exactly that group and
+                touches nothing else. A second control that opens ONE group is a second
+                path into the same state with none of those guards.
               */}
-              {!g.started && !online && (
-                <button data-testid={`start-group-${g.groupNumber}`} onClick={() => startOne(g.group_id)} disabled={busy}
-                  style={{ fontSize: typography.sizeXs, padding: '0.15rem 0.5rem' }}>Start this group</button>
-              )}
             </div>
           ))}
         </div>
