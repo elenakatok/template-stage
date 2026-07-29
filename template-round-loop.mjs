@@ -62,6 +62,15 @@ async function seedGroup(gid, pids, groupId = 'g') {
   return res.ok
 }
 
+async function seedRoster(gid, pids) {
+  const res = await fetch(`${FUNCTIONS}/seedRosterForTest`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ game_instance_id: gid, participant_ids: pids }),
+  })
+  return res.ok
+}
+const matchNow = (gid) => callFn('triggerMatching', asDev(gid, {}))
+
 const open    = (gid, seed) => callFn('openRound', { _dev: { game_instance_id: gid, seed }, group_id: 'g' })
 const sview   = (gid, pid) => callFn('getRoundView', asStudent(gid, pid, { group_id: 'g' }))
 const iview   = (gid) => callFn('getInstructorRoundView', asDev(gid, { group_id: 'g' }))
@@ -270,6 +279,69 @@ async function main() {
     // The stored document is the last surface. Rules must deny it BY NAME.
     check(/template_round/.test(RULES_TEXT) && /allow read, write: if false/.test(RULES_TEXT),
       '(L) firestore.rules denies the round-state collection BY NAME, not merely by default')
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ── (M) THE CLASSROOM MATCH PATH ───────────────────────────────────────────
+  //
+  // ⚠ THIS SECTION EXISTS BECAUSE ITS ABSENCE SHIPPED A BROKEN GAME.
+  //
+  // Every other section of this harness starts from `seedGroupForTest`, which writes a
+  // MATCHED group directly — so the whole pre-game flow was untested, and the game
+  // reached production without exporting `triggerMatching` at all. The first instructor
+  // action failed with a bare "internal": the callable SDK had POSTed to a function that
+  // did not exist, got a 404 that is not a callable envelope, and had nothing better to
+  // say. There were no server logs to find, because no function ran.
+  //
+  // A round-loop harness that seeds its way past matching cannot catch that. This section
+  // drives the REAL button path instead.
+  // ═══════════════════════════════════════════════════════════════════════════
+  banner('(M) the classroom Match path — the button an instructor presses first')
+  {
+    // (M1) COMPLETENESS: every callable the SHARED dashboard invokes must exist here.
+    // This is the check that would have caught the outage. A deploy list generated from
+    // this game's own exports proves the list agrees with itself, not that it is complete.
+    const uiCalls = execSync(
+      `grep -rhoE "httpsCallable[^,]*,[[:space:]]*'[a-zA-Z]+'" ${ROOT}/../../packages/game-ui/src/ | grep -oE "'[a-zA-Z]+'$" | tr -d "'" | sort -u`,
+    ).toString().trim().split('\n').filter(Boolean)
+    // Known fleet-wide gap, deliberately excluded: NO game exports these two. The shared
+    // dashboard's latecomer button would fail the same opaque way if it ever rendered;
+    // this fleet places latecomers through verifyAttendanceCode/placeLatecomer instead.
+    // Documented, not silently dropped — if a game ever adopts that button, delete this.
+    const KNOWN_UNIMPLEMENTED = ['addLateParticipant', 'markParticipantLate']
+    const required = uiCalls.filter((n) => !KNOWN_UNIMPLEMENTED.includes(n))
+    const health = await fetch(`${FUNCTIONS}/health`).then((r) => r.ok).catch(() => false)
+    check(health, '(M1) functions are up')
+    for (const name of required) {
+      const r = await callFn(name, asDev('probe', {}))
+      // A NON-EXISTENT callable answers "not-found"/http 404. Anything else — including a
+      // legitimate rejection — proves the function is deployed, which is all this asserts.
+      const exists = !(r.error ?? '').includes('http 404')
+      check(exists, `(M1) shared UI invokes '${name}' — and this game exports it`)
+    }
+
+    // (M2) THE HAPPY PATH: four unmatched students → two groups of two.
+    const gid = 'matchpath'
+    check(await seedRoster(gid, ['s1', 's2', 's3', 's4']), '(M2) seeded 4 unmatched, present students')
+    const m = await matchNow(gid)
+    check(m.ok, `(M2) triggerMatching succeeds — got: ${m.ok ? 'ok' : m.error}`)
+    const groups = await callFn('getRoster', asDev(gid, {}))
+    const formed = groups.ok ? (groups.result.groups ?? []) : []
+    check(formed.length === 2, `(M2) two groups formed (got ${formed.length})`)
+    const sizes = formed.map((g) => Object.values(g.participants_by_role ?? {}).flat().length)
+    check(sizes.every((n) => n === 2), `(M2) every group has exactly 2 seats (got ${sizes.join(',')})`)
+
+    // (M3) THE REFUSAL: one student, two seats. Refusing is CORRECT — what matters is
+    // that it refuses with a TYPED, READABLE error rather than an opaque one. An
+    // instructor who sees "internal" has nothing to act on; "not enough participants"
+    // tells them to wait for someone else to arrive.
+    const lone = 'matchpath-lone'
+    await seedRoster(lone, ['solo'])
+    const r = await matchNow(lone)
+    check(!r.ok, '(M3) one student cannot form a group of two — correctly refused')
+    check(/not enough participants/i.test(r.error ?? ''),
+      `(M3) and the refusal is READABLE, not "internal" — got: ${r.error}`)
+    check(!/^internal$/i.test(r.error ?? ''), '(M3) the refusal is not the generic wrapper')
   }
 
   // ── (E) the spawn gates ──────────────────────────────────────────────────────

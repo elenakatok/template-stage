@@ -8,6 +8,7 @@ import {
   makeGenerateAttendanceCode,
   makeVerifyAttendanceCode,
   makeGetRoster,
+  makeTriggerMatching,
   makeSubmitInstructorOutcome,
   makeFinalizeInstance,
   makePushResultsToClassroom,
@@ -46,6 +47,23 @@ export const confirmReady           = makeConfirmReady(templateGameDef)
 export const generateAttendanceCode = makeGenerateAttendanceCode(templateGameDef)
 export const verifyAttendanceCode   = makeVerifyAttendanceCode(templateGameDef)
 export const getRoster              = makeGetRoster(templateGameDef)
+
+/**
+ * THE CLASSROOM MATCHER — the callable behind the dashboard's "Match Now" button.
+ *
+ * ⚠ IT IS NOT OPTIONAL, AND ITS ABSENCE IS INVISIBLE UNTIL AN INSTRUCTOR CLICKS.
+ * game-ui's shared InstructorDashboard invokes `triggerMatching` BY NAME
+ * (InstructorDashboard.tsx). A game that does not export it deploys cleanly, passes every
+ * build and every emulator round-loop test, and then fails the very first instructor
+ * action in production with a bare "internal" — because the callable SDK gets a 404 that
+ * is not a callable envelope and has nothing better to say. There are no server logs to
+ * find, because no function ran.
+ *
+ * That is exactly how it reached production once. Do not remove it, and do not assume a
+ * deploy list generated from this file's exports proves completeness — it proves only
+ * that the list agrees with itself.
+ */
+export const triggerMatching        = makeTriggerMatching(templateGameDef)
 export const getGameConfig          = makeGetGameConfig(templateGameDef)
 export const updateGameConfig       = makeUpdateGameConfig(templateGameDef)
 export const getInfoUrls            = makeGetInfoUrls(templateGameDef)
