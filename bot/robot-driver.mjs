@@ -125,7 +125,11 @@ async function readyUrlFor(seatIndex) {
   const res = await fetch(`${LAUNCHER}/api/student-url`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ instance: INSTANCE, index: seatIndex, mode: 'ready' }),
+    // ⚠ `game_instance_id`, NOT `instance`. The launcher's /api/student-url requires
+    // that exact key and 400s on anything else — the template shipped `instance`, so
+    // robot mode was broken in every game spawned from it, and the failure surfaced as
+    // a 400 from the launcher rather than as anything naming the driver.
+    body: JSON.stringify({ game_instance_id: INSTANCE, index: seatIndex, mode: 'ready' }),
   })
   if (!res.ok) throw new Error(`launcher /api/student-url failed: ${res.status} ${await res.text()}`)
   const body = await res.json()
