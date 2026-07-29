@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { SEATS_PER_GROUP } from '../groupSize'
 import { colors, typography, spacing } from '@mygames/game-ui'
 import { getGameConfig, getGameDashboard, startAllGroups, type DashboardGroup } from '../api'
 
@@ -25,7 +26,6 @@ import { getGameConfig, getGameDashboard, startAllGroups, type DashboardGroup } 
 
 const POLL_MS = 4000
 /** Seats per group. */
-const SEATS_PER_GROUP = 2
 
 /** Crisis's wording, verbatim in shape: one sentence per group. */
 function statusLine(g: DashboardGroup): string {
