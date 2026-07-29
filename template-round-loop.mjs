@@ -347,10 +347,28 @@ async function main() {
   // ── (E) the spawn gates ──────────────────────────────────────────────────────
   banner('(E) spawn hygiene')
   {
+    /*
+      ⚠ THE SWEEP MUST REACH OUTSIDE src/. It used to grep only functions/src and
+      frontend/src, and a spawned game shipped with `<title>Crisis</title>` in
+      frontend/index.html — students saw another game's name in their browser tab, and
+      the gate that exists to catch exactly this reported zero markers because it never
+      looked at the file.
+
+      index.html, the rules files and firebase.json all sit outside src/ and all carry
+      identity. Anything that names the game belongs in this list; when in doubt, add it
+      — a false positive costs one edit, a miss ships another game's name to students.
+    */
+    const SWEPT = [
+      `${ROOT}/functions/src`,
+      `${ROOT}/frontend/src`,
+      `${ROOT}/frontend/index.html`,
+      `${ROOT}/firestore.rules`,
+      `${ROOT}/firebase.json`,
+    ].join(' ')
     const countIn = (marker) => {
       try {
         return Number(execSync(
-          `grep -rl "${marker}" ${ROOT}/functions/src ${ROOT}/frontend/src | wc -l`,
+          `grep -rl "${marker}" ${SWEPT} 2>/dev/null | wc -l`,
         ).toString().trim())
       } catch { return 0 }   // grep exits 1 when nothing matches
     }
