@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { SEATS_PER_GROUP } from '../groupSize'
 import { colors, typography, spacing } from '@mygames/game-ui'
 import OnlineMatchControl, { GROUP_BUTTON_LABEL } from './OnlineMatchControl'
+import { setClockMode } from '../api'
 import { getGameConfig, getGameDashboard, startAllGroups, type DashboardGroup } from '../api'
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -74,7 +75,8 @@ function StartClass({ readyCount, onDone }: { readyCount: number; onDone: () => 
 }
 
 export default function GameControlStrip() {
-  const [clockMode, setClockMode] = useState<string | null>(null)
+  const [clockMode, setClockMode_] = useState<string | null>(null)
+  const [modeSaving, setModeSaving] = useState(false)
   const [groups, setGroups] = useState<DashboardGroup[]>([])
   const [error, setError] = useState<string | null>(null)
 
@@ -116,7 +118,7 @@ export default function GameControlStrip() {
 
   useEffect(() => {
     void (async () => {
-      try { setClockMode((await getGameConfig()).clock_mode ?? 'on') } catch { setClockMode('on') }
+      try { setClockMode_((await getGameConfig()).clock_mode ?? 'on') } catch { setClockMode_('on') }
     })()
     void refresh()
     const t = setInterval(() => { void refresh() }, POLL_MS)
@@ -127,7 +129,67 @@ export default function GameControlStrip() {
   const notStarted = groups.filter((g) => !g.started).length
   const neverStartedStudents = notStarted * SEATS_PER_GROUP
 
+  const anyStarted = groups.some((g) => g.started)
+
+  /*
+    ── SESSION MODE — THE CONTROL THAT SWITCHES THE WHOLE SESSION ──
+    ⚠ THIS IS WHAT WAS MISSING, AND IT IS WHY ONLINE WAS UNREACHABLE. `clock_mode` is
+    registered as a config field, but the Settings page does not render it and is not
+    supposed to: crisis puts the mode where the instructor makes the decision — at the
+    top of the dashboard, above Groups, before anyone has arrived. Infoshare had no such
+    control, so an instructor could not put the game into online mode at all, the online
+    panel never appeared, and Elena's 9/21 online class had no path to run.
+
+    ⚠ LOCKED ONCE ANY GROUP HAS STARTED. Switching mid-session would change the rules
+    under students already playing — the clock either defaults their stage or it does
+    not, and a group cannot be half of each.
+  */
+  const chooseMode = async (m: 'on' | 'off') => {
+    if (m === clockMode || modeSaving || anyStarted) return
+    setModeSaving(true); setError(null)
+    try {
+      const c = await setClockMode(m)
+      setClockMode_(c.clock_mode === 'off' ? 'off' : 'on')
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not change mode.') }
+    setModeSaving(false)
+  }
+  const modeBtn = (active: boolean): React.CSSProperties => ({
+    padding: '0.4rem 0.9rem', fontWeight: 600, cursor: anyStarted ? 'not-allowed' : 'pointer',
+    borderRadius: 4, border: `1px solid ${active ? colors.text : colors.borderLight}`,
+    background: active ? colors.text : colors.white,
+    color: active ? colors.white : colors.textSecondary,
+    opacity: anyStarted && !active ? 0.5 : 1,
+  })
+
   return (
+    <>
+    <div
+      data-testid="session-mode-switch"
+      style={{ margin: '0 0 1rem', padding: '0.6rem 1rem', border: `1px solid ${colors.borderMid}`,
+               borderRadius: 8, background: colors.surfaceSubtle, fontFamily: typography.fontFamily }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: spacing.gapMd, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700 }}>Session mode:</span>
+        <div style={{ display: 'flex', gap: spacing.gapSm }}
+             title={anyStarted ? 'A group has started — mode is locked for this session.' : ''}>
+          <button data-testid="mode-classroom" style={modeBtn(clockMode === 'on')}
+            disabled={modeSaving || clockMode === null || anyStarted}
+            onClick={() => chooseMode('on')}>Classroom — round clock</button>
+          <button data-testid="mode-online" style={modeBtn(clockMode === 'off')}
+            disabled={modeSaving || clockMode === null || anyStarted}
+            onClick={() => chooseMode('off')}>Online — no clock</button>
+        </div>
+        {clockMode && (
+          <span style={{ fontSize: typography.sizeXs, color: colors.textSecondary }}>
+            {clockMode === 'on'
+              ? 'Stages time out after the round clock; a timeout plays the default action.'
+              : 'No clock — pre-grouped, students self-schedule, stages wait for every seat.'}
+          </span>
+        )}
+        {anyStarted && <span style={{ fontSize: typography.sizeXs, color: colors.textMuted }}>Locked — a group has started.</span>}
+      </div>
+    </div>
+
     <div data-testid="game-control-strip"
       style={{ margin: '0 0 1.5rem', padding: '0.75rem 1rem', border: `1px solid ${colors.borderMid}`, borderRadius: 8, background: colors.surfaceSubtle, fontFamily: typography.fontFamily }}>
 
@@ -196,5 +258,6 @@ export default function GameControlStrip() {
 
       {error && <p role="alert" data-testid="control-error" style={{ color: '#b91c1c', fontSize: typography.sizeXs, margin: `${spacing.gapSm} 0 0` }}>{error}</p>}
     </div>
+    </>
   )
 }
