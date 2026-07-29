@@ -159,20 +159,32 @@ async function readSeatView(page) {
 // the page renders produces a flaky failure that looks like a game bug, and it will be
 // investigated as one.
 // ═══════════════════════════════════════════════════════════════════════════════
+/** The test id for each action kind — the ids this game's decision screens render. */
+const SELECTOR_FOR = (action) =>
+    action.kind === 'signal'  ? `[data-testid="signal-choices-${action.signal}"]`
+  : action.kind === 'respond' ? `[data-testid="quantity-choices-${action.quantity}"]`
+  : null
+
 async function actInUi(page, action) {
-  if (action.kind === 'signal') {
-    const sel = `[data-testid="signal-choices-${action.signal}"]`
-    await page.waitForSelector(sel, { timeout: 15000 })
-    await page.click(sel)
-    return
-  }
-  if (action.kind === 'respond') {
-    const sel = `[data-testid="quantity-choices-${action.quantity}"]`
-    await page.waitForSelector(sel, { timeout: 15000 })
-    await page.click(sel)
-    return
-  }
-  throw new Error(`actInUi: unknown action kind ${JSON.stringify(action)}`)
+  const sel = SELECTOR_FOR(action)
+  if (!sel) throw new Error(`actInUi: unknown action kind ${JSON.stringify(action)}`)
+  /*
+    ⚠ A MISSING CONTROL IS "THE SCREEN MOVED ON", NOT A FAILURE.
+
+    This used to `waitForSelector` and throw on timeout, which killed the seat outright.
+    The sequence that hit it: the driver clicked, polled before its own submission was
+    reflected, decided again, and by the time it looked for the button the round had
+    resolved and the RESULTS screen had replaced the decision screen. The control was
+    legitimately gone, and the driver treated that as fatal — one round into a ten-round
+    game, both seats dead.
+
+    Returning false lets the loop re-read and find out what actually happened, which is
+    the only honest response to "the thing I expected is not there".
+  */
+  const found = await page.waitForSelector(sel, { timeout: 8000 }).catch(() => null)
+  if (!found) return false
+  await page.click(sel).catch(() => {})
+  return true
 }
 
 // ── the loop (SHARED — do not edit per game) ───────────────────────────────────
@@ -194,6 +206,54 @@ async function dismissResultsIfShowing(page) {
   if (await btn.isDisabled().catch(() => true)) return false
   await btn.click().catch(() => {})
   return true
+}
+
+
+/**
+ * WHERE THIS SEAT IS, as one comparable value: round, stage, and what it owes.
+ *
+ * ⚠ THIS IS THE THING THAT DISTINGUISHES "MY SUBMISSION LANDED" FROM "THE POLL RETURNED
+ * THE SAME THING AGAIN", and getting that distinction wrong is how a waiter becomes
+ * either a hang or a false pass.
+ *
+ * Unchanged tuple ⇒ genuinely nothing happened: same round, same stage, still owed.
+ * Changed tuple   ⇒ the state moved past the point I acted at. `owes` going null is the
+ *                   direct evidence that MY action was accepted — the server is the only
+ *                   thing that can clear it for this seat.
+ *
+ * A tuple cannot change while my submission is still outstanding, and cannot stay the
+ * same once it has landed, so the two cases can never be confused. (A clock default can
+ * also move it, and that is fine: my action did not land but the state moved on, and
+ * continuing is correct either way.)
+ */
+const positionOf = (v) => `${v.round}:${v.stage ?? ''}:${v.owes ?? ''}`
+
+/**
+ * Wait until this seat's position actually moves. Never a fixed sleep: a sleep long
+ * enough to be safe is long enough to make a ten-round game take an hour, and a sleep
+ * short enough to be quick re-decides before the submission is reflected — which is the
+ * double-act this replaces.
+ *
+ * ⚠ ON TIMEOUT IT RETURNS 'timeout' AND THE CALLER CONTINUES. It does not throw and it
+ * does not pretend to have moved. The loop re-reads; if the submission did land, `owes`
+ * is null and nothing is re-sent; if it did not, the seat legitimately owes an action
+ * again and retries. Neither branch can silently report success.
+ */
+async function waitForMove(page, before, label, timeoutMs = 25000) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    await sleep(POLL_MS)
+    if (await dismissResultsIfShowing(page)) {
+      console.log(`[${label}] continued past the round result`)
+      return 'results'
+    }
+    const v = await readSeatView(page)
+    if (!v) continue
+    if (v.status === 'finished') return 'finished'
+    if (positionOf(v) !== before) return 'moved'
+  }
+  console.warn(`[${label}] ⚠ no movement in ${timeoutMs}ms after acting — re-reading`)
+  return 'timeout'
 }
 
 async function runSeat(page, label) {
@@ -239,10 +299,18 @@ async function runSeat(page, label) {
 
     await think()
     const action = decide(view, S)
+    const before = positionOf(view)
     console.log(`[${label}] round ${view.round} ${view.stage} → ${JSON.stringify(action)}`)
-    await actInUi(page, action)
+    const clicked = await actInUi(page, action)
+    if (!clicked) {
+      // The control vanished between deciding and clicking — the screen moved on under
+      // us. Do NOT count it as an action and do NOT retry blindly; re-read instead.
+      console.log(`[${label}] the control was gone — re-reading rather than retrying`)
+      await sleep(POLL_MS)
+      continue
+    }
     actionsTaken++
-    await sleep(POLL_MS)
+    await waitForMove(page, before, label)
   }
 }
 
