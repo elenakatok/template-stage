@@ -3,6 +3,7 @@ import { InstructorDashboard as SharedDashboard, type DeadlockResolutionProps, t
 import { auth, functions, rtdb } from '../firebase'
 import { submitInstructorOutcome } from '../api'
 import GameControlStrip from './GameControlStrip'
+import { getGameDashboard } from '../api'
 import { templateRoleConfig } from '../gameConfig'
 
 // ── Role labels from game config (SINGLE matching role — `player`) ─────────────
@@ -66,6 +67,42 @@ function ManualOutcomeControl({ submitting, error, onSubmit }: DeadlockResolutio
 
 // ── Page component ────────────────────────────────────────────────────────────
 
+/**
+ * The finalize pre-flight.
+ *
+ * ⚠ IT DOES NOT BLOCK. The rule is the instructor's: anyone in a group at finalize
+ * participated, and ungrouping is how a no-show is declared. What this prevents is the
+ * SILENT version — forgetting to ungroup and discovering it in the gradebook. It reads
+ * live state at the moment of the decision rather than trusting whatever the strip last
+ * polled, and it fails OPEN: if the count cannot be read, finalize proceeds.
+ */
+async function confirmFinalize(): Promise<boolean> {
+  let inGroups = 0, neverStartedStudents = 0, neverStarted = 0
+  try {
+    const d = await getGameDashboard()
+    const groups = d.groups ?? []
+    inGroups = groups.length * 2
+    neverStarted = groups.filter((g) => !g.started).length
+    neverStartedStudents = neverStarted * 2
+  } catch {
+    return true
+  }
+  if (neverStarted === 0) {
+    return window.confirm(
+      `Finalize and push scores?\n\n${inGroups} students in groups, all of which played.\n\n` +
+      'This is irreversible.',
+    )
+  }
+  return window.confirm(
+    `Finalize and push scores?\n\n` +
+    `${inGroups} students in groups, ${neverStartedStudents} in ${neverStarted} group` +
+    `${neverStarted === 1 ? '' : 's'} that never started.\n\n` +
+    `Those ${neverStartedStudents} will be scored as PARTICIPANTS. If they did not take ` +
+    'part, cancel and ungroup them first — ungrouped students score \u22122 and are left ' +
+    'out of the class average.\n\nThis is irreversible. Continue?',
+  )
+}
+
 export default function InstructorDashboard() {
   return (
     <>
@@ -93,6 +130,7 @@ export default function InstructorDashboard() {
         settingsRoute="/settings"
         reportsRoute="/reports"
         scoreAndRecord={{ callableName: 'scoreAndRecord', label: 'Score & Record' }}
+        beforeFinalize={confirmFinalize}
       />
     </>
   )

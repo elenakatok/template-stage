@@ -28,6 +28,8 @@ import { getGameConfig, getGameDashboard, startAllGroups, openRound, type Dashbo
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const POLL_MS = 4000
+/** Seats per group — the group size this game matches to. */
+const SEATS_PER_GROUP = 2
 
 export default function GameControlStrip() {
   const [clockMode, setClockMode] = useState<string | null>(null)
@@ -78,9 +80,12 @@ export default function GameControlStrip() {
   }
 
   const online = clockMode === 'off'
-  const notStarted = groups.filter((g) => !g.started).length
   const running = groups.filter((g) => g.started && g.status !== 'finished').length
   const finished = groups.filter((g) => g.status === 'finished').length
+  // "Never started" = a group with no round document. Its students are still grouped,
+  // and therefore still count as participants at finalize.
+  const neverStarted = groups.filter((g) => !g.started).length
+  const neverStartedStudents = neverStarted * SEATS_PER_GROUP
 
   return (
     <section
@@ -110,10 +115,28 @@ export default function GameControlStrip() {
         )}
 
         <span data-testid="group-counts" style={{ color: colors.textSecondary }}>
-          {groups.length} group{groups.length === 1 ? '' : 's'} · {notStarted} not started ·{' '}
+          {groups.length} group{groups.length === 1 ? '' : 's'} · {neverStarted} not started ·{' '}
           {running} running · {finished} finished
         </span>
       </div>
+
+      {/*
+        ⚠ THE GRADING CONSEQUENCE, SHOWN BEFORE IT IS LOCKED IN.
+        Group membership means participation: a student in a group that never started is
+        still scored as a participant. That is the instructor's rule — ungrouping is how
+        a no-show is declared — but a forgotten ungroup is silent, so it is said out loud
+        here and again on finalize.
+      */}
+      {neverStartedStudents > 0 && (
+        <p data-testid="never-started-warning"
+          style={{ margin: `${spacing.gapSm} 0 0`, padding: spacing.gapSm, borderRadius: 4,
+                   background: '#fef3c7', border: '1px solid #f59e0b' }}>
+          <strong>{neverStarted} group{neverStarted === 1 ? '' : 's'} never started</strong>
+          {' '}— {neverStartedStudents} student{neverStartedStudents === 1 ? '' : 's'}.
+          {' '}They will be scored as <strong>participants</strong> unless you ungroup them
+          first. Ungrouped students score −2 and are left out of the class average.
+        </p>
+      )}
 
       {msg && <p data-testid="start-result" style={{ margin: `${spacing.gapSm} 0 0` }}>{msg}</p>}
       {error && <p role="alert" data-testid="control-error" style={{ color: '#b91c1c', margin: `${spacing.gapSm} 0 0` }}>{error}</p>}
