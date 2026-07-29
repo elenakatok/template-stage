@@ -361,6 +361,46 @@ async function main() {
       check(exists, `(M1) shared UI invokes '${name}' — and this game exports it`)
     }
 
+    /*
+      (M1b) THE MIRROR: a callable with NO BUTTON.
+
+      ⚠ M1 catches a button with no callable. This catches the opposite, and the opposite
+      is what actually shipped: `groupParticipantsOnline`, `getOnlineGroups`, `moveSeat`
+      and `topUpGroupWithBots` were exported by the frontend and CALLED BY NOTHING, while
+      the control strip told the instructor to press a "Group participants" button that
+      did not exist. An online class could not be run at all, and every harness was green
+      because they all drive those callables DIRECTLY.
+
+      So: every ONLINE callable this game's frontend wraps must have a caller in the UI,
+      or be named here as deliberately unwired. A wrapper with no caller is either a dead
+      export or a missing button, and both are worth failing over.
+    */
+    {
+      const API = `${ROOT}/frontend/src/api.ts`
+      const ONLINE_CALLABLES = [
+        'groupParticipantsOnline', 'getOnlineGroups', 'moveSeat',
+        'topUpGroupWithBots', 'fillRemainderWithBots',
+      ]
+      // Deliberately unwired, with the reason. Empty today — keep it that way if you can.
+      const INTENTIONALLY_UNWIRED = []
+      for (const name of ONLINE_CALLABLES) {
+        const wrapped = execSync(`grep -c "export const ${name}" ${API} || true`).toString().trim() !== '0'
+        if (!wrapped) { check(false, `(M1b) api.ts wraps '${name}'`); continue }
+        /*
+          ⚠ A CALL SITE, NOT A MENTION. The first version grepped the bare word and
+          passed on `topUpGroupWithBots` because a COMMENT in the new component named it
+          — a green check whose only evidence was prose about the bug it was meant to
+          catch. Requiring `name(` means only an actual invocation counts.
+        */
+        const callers = execSync(
+          `grep -rl "${name}(" ${ROOT}/frontend/src --include=*.tsx || true`,
+        ).toString().trim().split('\n').filter(Boolean)
+        const ok = callers.length > 0 || INTENTIONALLY_UNWIRED.includes(name)
+        check(ok, `(M1b) '${name}' has a UI caller — not a callable with no button` +
+          (ok && callers.length ? ` (${callers.length} file(s))` : ''))
+      }
+    }
+
     // (M2) THE HAPPY PATH: four unmatched students → two groups of two.
     const gid = 'matchpath'
     check(await seedRoster(gid, ['s1', 's2', 's3', 's4']), '(M2) seeded 4 unmatched, present students')

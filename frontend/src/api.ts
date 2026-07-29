@@ -324,6 +324,11 @@ export type OnlineMember = { participant_id: string; display_name: string; email
 export type OnlineGroup  = { group_id: string; members: OnlineMember[]; size: number; locked: boolean }
 
 /** Pre-form random groups from the roster (online mode; re-runnable until the first lock). */
+/** Create a group for the ungrouped remainder and fill it with bots. */
+export const fillRemainderWithBots = () =>
+  callFn<{ ok: boolean; created: boolean; group_id?: string; humans?: number; bots?: number; reason?: string }>(
+    'fillRemainderWithBots', {})
+
 export const groupParticipantsOnline = () =>
   callFn<{ ok: boolean; groups: number; full_groups: number; short_group_size: number | null; total_humans: number }>(
     'groupParticipantsOnline', {})

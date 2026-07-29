@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { SEATS_PER_GROUP } from '../groupSize'
 import { colors, typography, spacing } from '@mygames/game-ui'
+import OnlineMatchControl, { GROUP_BUTTON_LABEL } from './OnlineMatchControl'
 import { getGameConfig, getGameDashboard, startAllGroups, type DashboardGroup } from '../api'
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -129,7 +130,7 @@ export default function GameControlStrip() {
 
       {groups.length === 0 ? (
         <div style={{ fontSize: typography.sizeSm, color: colors.textSecondary }}>
-          {online ? 'Press “Group participants” to form groups.' : 'Match students into groups to begin.'}
+          {online ? `Press “${GROUP_BUTTON_LABEL}” to form groups.` : 'Match students into groups to begin.'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.gapSm }}>
@@ -155,6 +156,8 @@ export default function GameControlStrip() {
           ))}
         </div>
       )}
+
+      {online && <OnlineMatchControl onChanged={refresh} />}
 
       {error && <p role="alert" data-testid="control-error" style={{ color: '#b91c1c', fontSize: typography.sizeXs, margin: `${spacing.gapSm} 0 0` }}>{error}</p>}
     </div>
