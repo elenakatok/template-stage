@@ -2,17 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { colors, typography, spacing } from '@mygames/game-ui'
 import {
   getOnlineGroups, groupParticipantsOnline, moveSeat, fillRemainderWithBots,
-  topUpGroupWithBots, getRoster,
-  type OnlineGroup,
+  topUpGroupWithBots,
+  type OnlineGroup, type OnlineOccupant,
 } from '../api'
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // THE ONLINE INSTRUCTOR CONTROL — the buttons an online session is actually run from.
-//
-// ⚠ SPAWNED GAMES INHERITED THE HOLE. Infoshare shipped slices 1–3 with these callables
-// wrapped in api.ts and CALLED BY NOTHING, so an online class could not be run at all —
-// and every game spawned from this template had the same gap. The round-loop gate's
-// (M1b) check now fails if any online callable loses its button.
 //
 // ⚠ THIS EXISTED ONLY AS API WRAPPERS UNTIL NOW. `groupParticipantsOnline`,
 // `getOnlineGroups`, `moveSeat` and `topUpGroupWithBots` were all exported by the
@@ -48,23 +43,25 @@ const btn: React.CSSProperties = {
 
 export default function OnlineMatchControl({ onChanged }: { onChanged?: () => void }) {
   const [groups, setGroups] = useState<OnlineGroup[]>([])
-  const [pool, setPool] = useState<{ participant_id: string; display_name: string }[]>([])
+  const [pool, setPool] = useState<OnlineOccupant[]>([])
+  const [seatCount, setSeatCount] = useState(GROUP_SIZE)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
-      const [g, roster] = await Promise.all([getOnlineGroups(), getRoster()])
-      setGroups(g.groups ?? [])
-      // ⚠ THE POOL IS DERIVED, NOT STORED. An ungrouped student appears in no group by
-      // definition, so the only way to see them is to subtract: everyone on the roster
-      // who is in none of the groups. Bots are excluded — a robot in the "no group" list
-      // would read as a student who needs placing.
-      const inAGroup = new Set((g.groups ?? []).flatMap((x) => x.members.map((m) => m.participant_id)))
-      setPool((roster.participants ?? [])
-        .filter((p) => !inAGroup.has(p.participant_id) && !String(p.participant_id).startsWith('bot_'))
-        .map((p) => ({ participant_id: p.participant_id, display_name: p.display_name })))
+      /*
+        ⚠ THE SERVER ALREADY COMPUTES THE NO-GROUP POOL AND THE SEAT COUNT. An earlier
+        version derived the pool by subtracting grouped students from the roster — a
+        second implementation of something the response already carries in `no_group`,
+        which would drift the moment the server's notion of "eligible" changed. It also
+        hardcoded a seat count the response supplies.
+      */
+      const r = await getOnlineGroups()
+      setGroups(r.groups ?? [])
+      setPool(r.no_group ?? [])
+      if (typeof r.seat_count === 'number') setSeatCount(r.seat_count)
       setError(null)
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }, [])
@@ -89,9 +86,9 @@ export default function OnlineMatchControl({ onChanged }: { onChanged?: () => vo
     } finally { setBusy(false) }
   }
 
-  const anyStarted = groups.some((g) => g.locked)
-  const grouped = groups.reduce((n, g) => n + g.members.length, 0)
-  const short = groups.filter((g) => g.members.length < GROUP_SIZE)
+  const anyStarted = groups.some((g) => g.started)
+  const grouped = groups.reduce((n, g) => n + g.occupants.length, 0)
+  const short = groups.filter((g) => g.free_seats > 0)
 
   return (
     <section data-testid="online-match-control" style={{ marginTop: spacing.gapSm }}>
@@ -151,37 +148,40 @@ export default function OnlineMatchControl({ onChanged }: { onChanged?: () => vo
       {groups.length > 0 && (
         <div style={{ marginTop: spacing.gapMd, display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
           {groups.map((g, i) => (
-            <div key={g.group_id} data-testid={`online-group-${i + 1}`}
+            <div key={g.group_id} data-testid={`online-group-${g.group_number ?? i + 1}`}
               style={{ display: 'flex', alignItems: 'center', gap: spacing.gapSm, flexWrap: 'wrap',
                        paddingBottom: '0.3rem', borderBottom: `1px solid ${colors.borderFaint}` }}>
-              <span style={{ minWidth: 70, fontWeight: 600 }}>Group {i + 1}</span>
+              <span style={{ minWidth: 70, fontWeight: 600 }}>Group {g.group_number ?? i + 1}</span>
               <span style={{ fontSize: typography.sizeSm,
-                             color: g.members.length < GROUP_SIZE ? '#b45309' : colors.textSecondary }}>
-                {g.members.length}/{GROUP_SIZE} seats{g.locked ? ' · started' : ''}
+                             color: g.free_seats > 0 ? '#b45309' : colors.textSecondary }}>
+                {g.occupants.length}/{g.seat_count ?? seatCount} seats
+                {g.occupants.some((o) => o.is_bot) &&
+                  ` · ${g.occupants.filter((o) => o.is_bot).length} robot`}
+                {g.started ? ' · started' : ''}
               </span>
               {/* A SHORT group can be topped up on its own — the remainder button only
                   helps students who are in NO group. Both cases occur in a real class. */}
-              {!g.locked && g.members.length < GROUP_SIZE && (
+              {!g.started && g.free_seats > 0 && (
                 <button
-                  data-testid={`online-topup-${i + 1}`}
+                  data-testid={`online-topup-${g.group_number ?? i + 1}`}
                   disabled={busy}
                   style={{ fontSize: typography.sizeXs, padding: '0.1rem 0.4rem', cursor: 'pointer' }}
                   onClick={() => act('Top up', async () => {
                     const r = await topUpGroupWithBots(g.group_id)
-                    setNote(r.added ? `Added ${r.added} robot seat(s) to Group ${i + 1}` : 'Group already full')
+                    setNote(r.added ? `Added ${r.added} robot seat(s) to Group ${g.group_number ?? i + 1}` : 'Group already full')
                     return r
                   })}
                 >Add a robot</button>
               )}
-              {g.members.map((m) => (
+              {g.occupants.map((m) => (
                 <span key={m.participant_id} style={{ fontSize: typography.sizeSm, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  {m.display_name}
+                  {m.display_name}{m.is_bot ? ' 🤖' : ''}
                   {/*
                     UNGROUP — the instructor's way of declaring a no-show. It matters for
                     grading, not tidiness: a student left in a group is scored as a
                     participant even if the group never started.
                   */}
-                  {!g.locked && (
+                  {!m.is_bot && !g.started && (
                     <button
                       data-testid={`online-ungroup-${m.participant_id}`}
                       title="Remove from the group (declares a no-show)"

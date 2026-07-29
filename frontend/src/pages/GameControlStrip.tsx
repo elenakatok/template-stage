@@ -3,6 +3,7 @@ import { SEATS_PER_GROUP } from '../groupSize'
 import { colors, typography, spacing } from '@mygames/game-ui'
 import OnlineMatchControl, { GROUP_BUTTON_LABEL } from './OnlineMatchControl'
 import { setClockMode } from '../api'
+import PanelBoundary from './PanelBoundary'
 import { getGameConfig, getGameDashboard, startAllGroups, type DashboardGroup } from '../api'
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -254,7 +255,11 @@ export default function GameControlStrip() {
         </div>
       )}
 
-      {online && <OnlineMatchControl onChanged={refresh} />}
+      {online && (
+        <PanelBoundary name="Online grouping">
+          <OnlineMatchControl onChanged={refresh} />
+        </PanelBoundary>
+      )}
 
       {error && <p role="alert" data-testid="control-error" style={{ color: '#b91c1c', fontSize: typography.sizeXs, margin: `${spacing.gapSm} 0 0` }}>{error}</p>}
     </div>

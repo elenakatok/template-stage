@@ -320,8 +320,41 @@ export const submitInstructorOutcome = (groupId: string, outcome: OutcomeFields 
   callFn<{ ok: boolean }>('submitInstructorOutcome', { group_id: groupId, outcome })
 
 // ── Online-mode instructor grouping (Slice O1) ──────────────────────────────────
+/*
+  ⚠ THIS TYPE WAS CRISIS'S SHAPE, AND THAT IS WHY THE PANEL CRASHED IN PRODUCTION.
+  It declared `members`, `size` and `locked`; the deployed getOnlineGroups returns
+  `occupants`, `seat_count`/`free_seats` and `started`. TypeScript could not catch the
+  mismatch because the type itself was the lie — the component compiled cleanly and then
+  threw `can't access property "length", t.members is undefined` on a real dashboard.
+
+  Read off the deployed function's actual response, not the source and not from memory:
+    { ok, seat_count, groups: [ { group_id, group_number, started, seat_count,
+      free_seats, occupants: [ { participant_id, display_name, email, is_bot } ] } ],
+      no_group: [...] }
+*/
+/**
+ * The group-reveal DOCUMENT's member shape — a Firestore doc the student screen reads.
+ * ⚠ NOT the same as OnlineOccupant below. Two different surfaces genuinely carry two
+ * different shapes; collapsing them is how the dashboard ended up reading `members` off
+ * a callable that returns `occupants`.
+ */
 export type OnlineMember = { participant_id: string; display_name: string; email: string | null }
-export type OnlineGroup  = { group_id: string; members: OnlineMember[]; size: number; locked: boolean }
+
+/** One seat as the getOnlineGroups CALLABLE returns it. */
+export type OnlineOccupant = {
+  participant_id: string
+  display_name:   string
+  email:          string | null
+  is_bot:         boolean
+}
+export type OnlineGroup = {
+  group_id:     string
+  group_number: number
+  started:      boolean
+  seat_count:   number
+  free_seats:   number
+  occupants:    OnlineOccupant[]
+}
 
 /** Pre-form random groups from the roster (online mode; re-runnable until the first lock). */
 /** Create a group for the ungrouped remainder and fill it with bots. */
@@ -335,7 +368,8 @@ export const groupParticipantsOnline = () =>
 
 /** clock_mode + the online groups (with members) for the grouping panel. */
 export const getOnlineGroups = () =>
-  callFn<{ ok: boolean; clock_mode: string; groups: OnlineGroup[] }>('getOnlineGroups', {})
+  callFn<{ ok: boolean; seat_count: number; groups: OnlineGroup[]; no_group: OnlineOccupant[] }>(
+    'getOnlineGroups', {})
 
 /** Move a human into another group (both modes; rejected once a group locks). If the destination is
  *  full but has a bot seat, the move EVICTS one bot (§O2.5B) — evicted_bot names it. */
