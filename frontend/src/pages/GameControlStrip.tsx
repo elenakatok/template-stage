@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SEATS_PER_GROUP } from '../groupSize'
-import { GroupsPanel, colors, typography, spacing, type GroupsPanelRow } from '@mygames/game-ui'
+import { GroupsPanel, MoveMemberControl, colors, typography, spacing, type GroupsPanelRow } from '@mygames/game-ui'
 import OnlineMatchControl, { GROUP_BUTTON_LABEL } from './OnlineMatchControl'
 import { setClockMode, getOnlineGroups, moveSeat, topUpGroupWithBots, type OnlineGroup, type OnlineOccupant } from '../api'
 import PanelBoundary from './PanelBoundary'
@@ -192,9 +192,34 @@ export default function GameControlStrip() {
     catch (e) { setError(`Place: ${e instanceof Error ? e.message : 'failed'}`) }
   }
 
+  /*
+    ⚠ MOVE / UNGROUP IS THE SAME CALLABLE AS "place in…", ONLY THE ERROR LABEL DIFFERS.
+    `''` ungroups (the seat empties), `'new'` creates a group, anything else is a group id
+    — moveSeat's own contract, and the reason no new machinery was needed to restore this.
+  */
+  const move = async (participantId: string, dest: string) => {
+    setError(null)
+    try { await moveSeat(participantId, dest); await refresh() }
+    catch (e) { setError(`Move: ${e instanceof Error ? e.message : 'failed'}`) }
+  }
+
   const rows: GroupsPanelRow[] = groups.map((g) => {
     const s = seatsById.get(g.group_id)
     const bots = s?.occupants.filter((o) => o.is_bot).length ?? 0
+    /*
+      ⚠ THE PER-GROUP MOVE / UNGROUP CONTROL. It was lost when the duplicate group lists
+      were collapsed: the per-student controls lived in the duplicate, so removing the
+      duplication removed them. `moveSeat` was already here and already wired for the
+      No-Group pool — this is the missing UI, not missing machinery.
+
+      Destinations EXCLUDE this group (moving a student into their own group is a no-op) and
+      already exclude every started group. The control itself is NOT gated on a destination
+      existing: with a full class there is none, and that is precisely when an instructor
+      needs "— Remove from group".
+    */
+    const humanMembers = (s?.occupants ?? [])
+      .filter((o) => !o.is_bot)
+      .map((o) => ({ participantId: o.participant_id, name: o.display_name }))
     return {
       key: g.group_id,
       number: g.groupNumber,
@@ -204,10 +229,25 @@ export default function GameControlStrip() {
       seatCount: s ? (s.seat_count ?? SEATS_PER_GROUP) : undefined,
       bots,
       // Started == seats locked. There is no separate lock in this game: opening round 1
-      // is what freezes membership, so one flag serves both.
+      // is what freezes membership, so one flag serves both. GroupsPanel renders "🔒 locked"
+      // INSTEAD of these actions, which is what keeps the lock PER GROUP — a started group
+      // is frozen while its not-yet-started siblings stay fully rearrangeable.
       locked: g.started,
-      actions: s && !g.started && s.free_seats > 0
-        ? <TopUp groupId={g.group_id} seats={s.free_seats} onDone={refresh} onError={setError} />
+      actions: s && !g.started
+        ? (
+          <>
+            <MoveMemberControl
+              testId={`group-actions-${g.groupNumber}`}
+              groupNumber={g.groupNumber}
+              members={humanMembers}
+              destinations={destinations.filter((d) => d.id !== g.group_id)}
+              onMove={move}
+            />
+            {s.free_seats > 0 && (
+              <TopUp groupId={g.group_id} seats={s.free_seats} onDone={refresh} onError={setError} />
+            )}
+          </>
+        )
         : undefined,
     }
   })
