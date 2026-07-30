@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { onAuthStateChanged } from 'firebase/auth'
+import { auth } from '../firebase'
 import { SEATS_PER_GROUP } from '../groupSize'
 import { GroupsPanel, MoveMemberControl, colors, typography, spacing, type GroupsPanelRow } from '@mygames/game-ui'
 import OnlineMatchControl, { GROUP_BUTTON_LABEL } from './OnlineMatchControl'
@@ -93,20 +95,24 @@ export default function GameControlStrip() {
   const [groups, setGroups] = useState<DashboardGroup[]>([])
   const [error, setError] = useState<string | null>(null)
   /**
-   * ⚠ HAS THIS PANEL EVER LOADED? "Missing token" is a NORMAL state, not a fault.
+   * ⚠ HAS THIS PANEL EVER LOADED? A few early failures are tolerated before anything red.
    *
-   * The panel mounts and polls immediately, before the instructor's Firebase session has
-   * been established, so the first call or two throw `invalid-argument: Missing token`.
-   * Rendering that verbatim put a RED ERROR on the production dashboard every time Elena
-   * opened it, on a page that was working — it then vanished a second later. Same class
-   * as the pre-Start "This group has not started yet" alert: a normal state shown as a
-   * fault.
+   * ⚠ THIS USED TO BE THE ONLY DEFENCE, AND IT WAS THE WRONG ONE. The panel polled the
+   * moment it mounted, before the instructor's Firebase session existed, so the first
+   * calls really did throw `invalid-argument: Missing token`. That was written off here as
+   * "a NORMAL state, not a fault" and hidden behind the grace below — which fixed the
+   * developer's screen and not the instructor's: on a slow connection the session takes
+   * more than STARTUP_GRACE polls to establish, the grace is exceeded, and the red banner
+   * appears anyway. It also left three real HTTP 400s in the console on every load, which
+   * later cost a diagnosis session chasing a malformed request that did not exist.
+   *
+   * The session gate below is the actual fix: no request goes out unauthenticated, so
+   * "Missing token" is no longer a state this panel can reach. This flag now covers only
+   * genuinely transient network failures.
    *
    * ⚠ KEYED ON THE CONDITION, NOT THE MESSAGE. Matching the string "Missing token" would
    * break the moment it is reworded, and would also swallow a genuinely broken session
-   * that happens to say the same thing. The condition is: we have NEVER successfully
-   * loaded, and only briefly. Before the first success, a few failures are the session
-   * still coming up; past that, whatever is failing is real and is shown verbatim.
+   * that happens to say the same thing.
    */
   const [everLoaded, setEverLoaded] = useState(false)
   const failures = useRef(0)
@@ -125,7 +131,34 @@ export default function GameControlStrip() {
   const [seats, setSeats] = useState<OnlineGroup[]>([])
   const [pool, setPool] = useState<OnlineOccupant[]>([])
 
-  /** Failures tolerated before the first success — about six seconds at POLL_MS. */
+  /*
+    ── WAIT FOR THE INSTRUCTOR SESSION BEFORE ASKING FOR ANYTHING ──────────────────
+    ⚠ THIS STRIP IS MOUNTED BY THE SHARED DASHBOARD'S `underHeadline` SLOT, WHICH RENDERS
+    BEFORE THE SESSION EXISTS. The dashboard gates its OWN roster poll on `sessionReady`;
+    this slot had no such gate, so its first burst — getGameConfig, getGameDashboard,
+    getOnlineGroups — went out with no Firebase user, therefore no `Authorization: Bearer`
+    header, and the server answered "Missing token" / INVALID_ARGUMENT. The callable
+    protocol maps INVALID_ARGUMENT to HTTP 400, which is why the browser showed three 400s
+    that looked like a malformed request rather than an auth-timing problem.
+
+    It self-corrected — the same calls returned 200 on the next poll once the session
+    landed — which is exactly why it was easy to miss. STARTUP_GRACE below swallowed the
+    failures on a fast connection, so the developer never saw them; on a slower one the
+    session takes more than four polls to establish, the grace is exceeded, and the
+    instructor gets a red "Missing token" banner on a dashboard that is working fine.
+
+    onAuthStateChanged fires immediately with the current state, so this needs no separate
+    authStateReady() call, and it re-arms correctly if the dashboard signs a stale user out
+    before exchanging the launch token.
+  */
+  const [sessionReady, setSessionReady] = useState(false)
+  useEffect(() => onAuthStateChanged(auth, (u) => setSessionReady(!!u)), [])
+
+  /**
+   * Failures tolerated before the first success — about six seconds at POLL_MS.
+   * Kept for genuinely transient network errors. It is NO LONGER load-bearing for
+   * startup: with the session gate above, the first request cannot be unauthenticated.
+   */
   const STARTUP_GRACE = 4
 
   const refresh = useCallback(async () => {
@@ -152,13 +185,15 @@ export default function GameControlStrip() {
   }, [everLoaded])
 
   useEffect(() => {
+    // Nothing goes out until the instructor session exists — see the note above.
+    if (!sessionReady) return
     void (async () => {
       try { setClockMode_((await getGameConfig()).clock_mode ?? 'on') } catch { setClockMode_('on') }
     })()
     void refresh()
     const t = setInterval(() => { void refresh() }, POLL_MS)
     return () => clearInterval(t)
-  }, [refresh])
+  }, [refresh, sessionReady])
 
   const online = clockMode === 'off'
   const notStarted = groups.filter((g) => !g.started).length
