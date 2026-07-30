@@ -28,7 +28,7 @@
 //   node template-e2e.mjs        (env KEEP=1 leaves the stack up)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { openSync } from 'node:fs'
+import { openSync, mkdirSync, writeSync } from 'node:fs'
 import { spawn, execSync } from 'node:child_process'
 import { setTimeout as sleep } from 'node:timers/promises'
 import http from 'node:http'
@@ -41,6 +41,53 @@ const FUNCTIONS = `http://localhost:5005/${PROJECT}/us-central1`
 const PORTS     = [9101, 5005, 8082, 9002]
 const CB_PORT   = 5599
 const RTDB_NS   = `${PROJECT}-default-rtdb`
+
+/*
+  ── EVERY RUN'S FULL OUTPUT, TO ITS OWN TIMESTAMPED FILE ────────────────────────
+  ⚠ THIS EXISTS BECAUSE ONE OBSERVED FAILURE WAS UNRECOVERABLE. In infoshare (spawned from
+  this template) a run reported "229 passed, 1 FAILED" on 2026-07-29. The run had been
+  piped through `tail -6`, so the one `✗ FAIL:` line was cut before anyone read it, and the
+  failure never reproduced in ~17 subsequent runs. Which assertion failed is still unknown.
+  A suite whose failures are only observable if someone happened to keep the output cannot
+  be debugged from a rare event, and rare events are the ones worth debugging.
+
+  ⚠ NOT A FIXED SEED. The obvious "fix" for a run-to-run varying assertion count is to pin
+  the group id and make the suite deterministic. DO NOT. The random group id is what makes
+  a bot land on either role across runs, which is what exercises BOTH strategy branches.
+  Pinning it would hide a whole branch behind a stable-looking count. Keep the variation;
+  capture the evidence.
+
+  Writes with writeSync to a raw fd rather than a stream, so nothing is lost to buffering
+  when the run ends in process.exit(). The emulator's own output already goes to its own
+  log; `npm run build` inherits the real fd and so is not mirrored here — its output is a
+  compile, not evidence about an assertion.
+*/
+const LOG_DIR = path.join(ROOT, 'e2e-logs')
+mkdirSync(LOG_DIR, { recursive: true })
+const LOG_FILE = path.join(LOG_DIR, `e2e-${new Date().toISOString().replace(/[:.]/g, '-')}.log`)
+const LOG_FD = openSync(LOG_FILE, 'a')
+for (const s of ['stdout', 'stderr']) {
+  const passThrough = process[s].write.bind(process[s])
+  process[s].write = (chunk, enc, cb) => {
+    try { writeSync(LOG_FD, typeof chunk === 'string' ? chunk : Buffer.from(chunk)) }
+    catch { /* logging must never be able to break the run */ }
+    return passThrough(chunk, enc, cb)
+  }
+}
+/*
+  ⚠ A CRASH DOES NOT GO THROUGH process.stderr.write. Node prints a fatal error to fd 2
+  from inside the runtime, bypassing the patch above — verified by forcing the harness's
+  EADDRINUSE boot crash, whose log ended at the BOOT banner with no stack in it. That is
+  the SAME loss this file was just changed to prevent, so the fatal paths are logged
+  explicitly. (A boot crash is not hypothetical: it is what happens when a previous run's
+  mock classroom is still holding its port.)
+*/
+const logFatal = (label, err) => {
+  try { writeSync(LOG_FD, `\n${label}\n${err && err.stack ? err.stack : String(err)}\n`) }
+  catch { /* nothing useful left to do */ }
+}
+process.on('uncaughtException', (err) => { logFatal('UNCAUGHT EXCEPTION', err); console.error(err); process.exit(1) })
+process.on('unhandledRejection', (err) => { logFatal('UNHANDLED REJECTION', err); console.error(err); process.exit(1) })
 
 let PASS = 0, FAIL = 0
 const banner = (m) => console.log('\n' + '─'.repeat(72) + '\n' + m + '\n' + '─'.repeat(72))
@@ -371,6 +418,9 @@ async function main() {
   }
 
   banner(`RESULT — ${PASS} passed, ${FAIL} failed`)
+  // Printed last so it is the line still on screen after a failure, and printed on a pass
+  // too — a green run's log is the baseline the next red one gets diffed against.
+  console.log(`  full output: ${LOG_FILE}`)
   return FAIL === 0
 }
 
