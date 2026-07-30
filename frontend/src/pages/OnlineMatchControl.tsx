@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { colors, typography, spacing } from '@mygames/game-ui'
 import {
-  getOnlineGroups, groupParticipantsOnline, moveSeat, fillRemainderWithBots,
-  topUpGroupWithBots,
+  getOnlineGroups, groupParticipantsOnline, fillRemainderWithBots,
   type OnlineGroup, type OnlineOccupant,
 } from '../api'
 
@@ -26,11 +25,10 @@ import {
 // `underHeadline` slot — directly BELOW THE PAGE HEADLINE and ABOVE the roster table —
 // which is exactly where this panel belongs. Same shape, none of the DOM archaeology.
 //
-// ⚠ Two seats, not three. Everything below is sized from GROUP_SIZE; nothing assumes
-// crisis's group of three.
+// ⚠ Two seats, not three — and the seat count is now read from the SERVER's response by
+// the Groups panel, not declared here. This file no longer renders anything per-group, so
+// it no longer needs to know how big a group is.
 // ═══════════════════════════════════════════════════════════════════════════════
-
-const GROUP_SIZE = 2
 
 /** The label the control strip promises. Change both or neither — see the strip. */
 export const GROUP_BUTTON_LABEL = 'Group participants'
@@ -44,7 +42,6 @@ const btn: React.CSSProperties = {
 export default function OnlineMatchControl({ onChanged }: { onChanged?: () => void }) {
   const [groups, setGroups] = useState<OnlineGroup[]>([])
   const [pool, setPool] = useState<OnlineOccupant[]>([])
-  const [seatCount, setSeatCount] = useState(GROUP_SIZE)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -61,7 +58,6 @@ export default function OnlineMatchControl({ onChanged }: { onChanged?: () => vo
       const r = await getOnlineGroups()
       setGroups(r.groups ?? [])
       setPool(r.no_group ?? [])
-      if (typeof r.seat_count === 'number') setSeatCount(r.seat_count)
       setError(null)
     } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }, [])
@@ -145,82 +141,34 @@ export default function OnlineMatchControl({ onChanged }: { onChanged?: () => vo
       {note && <p data-testid="online-note" style={{ margin: `${spacing.gapSm} 0 0`, fontSize: typography.sizeXs, color: colors.textSecondary }}>{note}</p>}
       {error && <p role="alert" data-testid="online-error" style={{ margin: `${spacing.gapSm} 0 0`, fontSize: typography.sizeXs, color: '#b91c1c' }}>{error}</p>}
 
-      {groups.length > 0 && (
-        <div style={{ marginTop: spacing.gapMd, display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-          {groups.map((g, i) => (
-            <div key={g.group_id} data-testid={`online-group-${g.group_number ?? i + 1}`}
-              style={{ display: 'flex', alignItems: 'center', gap: spacing.gapSm, flexWrap: 'wrap',
-                       paddingBottom: '0.3rem', borderBottom: `1px solid ${colors.borderFaint}` }}>
-              <span style={{ minWidth: 70, fontWeight: 600 }}>Group {g.group_number ?? i + 1}</span>
-              <span style={{ fontSize: typography.sizeSm,
-                             color: g.free_seats > 0 ? '#b45309' : colors.textSecondary }}>
-                {g.occupants.length}/{g.seat_count ?? seatCount} seats
-                {g.occupants.some((o) => o.is_bot) &&
-                  ` · ${g.occupants.filter((o) => o.is_bot).length} robot`}
-                {g.started ? ' · started' : ''}
-              </span>
-              {/* A SHORT group can be topped up on its own — the remainder button only
-                  helps students who are in NO group. Both cases occur in a real class. */}
-              {!g.started && g.free_seats > 0 && (
-                <button
-                  data-testid={`online-topup-${g.group_number ?? i + 1}`}
-                  disabled={busy}
-                  style={{ fontSize: typography.sizeXs, padding: '0.1rem 0.4rem', cursor: 'pointer' }}
-                  onClick={() => act('Top up', async () => {
-                    const r = await topUpGroupWithBots(g.group_id)
-                    setNote(r.added ? `Added ${r.added} robot seat(s) to Group ${g.group_number ?? i + 1}` : 'Group already full')
-                    return r
-                  })}
-                >Add a robot</button>
-              )}
-              {g.occupants.map((m) => (
-                <span key={m.participant_id} style={{ fontSize: typography.sizeSm, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  {m.display_name}{m.is_bot ? ' 🤖' : ''}
-                  {/*
-                    UNGROUP — the instructor's way of declaring a no-show. It matters for
-                    grading, not tidiness: a student left in a group is scored as a
-                    participant even if the group never started.
-                  */}
-                  {!m.is_bot && !g.started && (
-                    <button
-                      data-testid={`online-ungroup-${m.participant_id}`}
-                      title="Remove from the group (declares a no-show)"
-                      disabled={busy}
-                      style={{ fontSize: typography.sizeXs, padding: '0 0.3rem', cursor: 'pointer' }}
-                      onClick={() => act('Ungroup', () => moveSeat(m.participant_id, ''))}
-                    >×</button>
-                  )}
-                </span>
-              ))}
-            </div>
-          ))}
-          <p style={{ margin: `${spacing.gapSm} 0 0`, fontSize: typography.sizeXs, color: colors.textSecondary }}>
-            {grouped} student(s) grouped
-            {short.length > 0 && ` · ${short.length} group(s) still short a seat`}
-          </p>
-        </div>
-      )}
-
       {/*
-        THE NO-GROUP POOL. Ungrouped students are not visible in the group list by
-        definition, so without this they vanish from the instructor's view entirely —
-        and an invisible ungrouped student is one who silently does not play.
+        ── WHAT USED TO BE HERE, AND WHY IT IS GONE ─────────────────────────────
+        ⚠ THIS PANEL RENDERED A SECOND GROUP LIST AND A SECOND NO-GROUP POOL, directly
+        below the ones in the Groups panel above it. That duplication is what made
+        the first spawned game's dashboard taller and sparser than crisis's for less
+        information: two
+        lists of the same groups, the upper one carrying the round and the lower one
+        carrying the seats, and neither carrying both.
+
+        The Groups panel now owns BOTH — it merges this callable's seat picture with the
+        round-loop status onto ONE row per group, and renders the no-group pool as crisis
+        does: one row of name + "place in…" dropdowns instead of a list of names with
+        nowhere to put them. Per-group bot top-up moved there too, onto the row it acts on.
+
+        ⚠ DO NOT RE-ADD A LIST HERE. If something about a group needs showing, it belongs
+        on that group's row. This section is the two ROSTER-WIDE buttons that have no row
+        to live on, and nothing else.
+
+        The one thing genuinely lost is the per-student × ungroup button. Placing a student
+        into a group is now the panel's job; removing them is the shared roster table's
+        (Ungroup), which is where every other game does it and which the finalize
+        pre-flight already warns about.
       */}
-      {pool.length > 0 && (
-        <div data-testid="online-no-group-pool" style={{ marginTop: spacing.gapMd }}>
-          <span style={{ fontSize: typography.sizeXs, fontWeight: 700 }}>
-            No group — will not play ({pool.length})
-          </span>
-          <div style={{ display: 'flex', gap: spacing.gapSm, flexWrap: 'wrap', marginTop: 2 }}>
-            {pool.map((p) => (
-              <span key={p.participant_id} data-testid={`online-pool-${p.participant_id}`}
-                style={{ fontSize: typography.sizeSm, color: colors.textSecondary }}>
-                {p.display_name}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      <p style={{ margin: `${spacing.gapSm} 0 0`, fontSize: typography.sizeXs, color: colors.textSecondary }}>
+        {grouped} student(s) grouped
+        {short.length > 0 && ` · ${short.length} group(s) still short a seat`}
+        {pool.length > 0 && ` · ${pool.length} in no group`}
+      </p>
     </section>
   )
 }

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SEATS_PER_GROUP } from '../groupSize'
-import { colors, typography, spacing } from '@mygames/game-ui'
+import { GroupsPanel, colors, typography, spacing, type GroupsPanelRow } from '@mygames/game-ui'
 import OnlineMatchControl, { GROUP_BUTTON_LABEL } from './OnlineMatchControl'
-import { setClockMode } from '../api'
+import { setClockMode, getOnlineGroups, moveSeat, topUpGroupWithBots, type OnlineGroup, type OnlineOccupant } from '../api'
 import PanelBoundary from './PanelBoundary'
 import { getGameConfig, getGameDashboard, startAllGroups, type DashboardGroup } from '../api'
 
@@ -28,13 +28,25 @@ import { getGameConfig, getGameDashboard, startAllGroups, type DashboardGroup } 
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const POLL_MS = 4000
-/** Seats per group. */
 
-/** Crisis's wording, verbatim in shape: one sentence per group. */
+/** ⚠ PLACEHOLDER_GAME — a spawned game replaces these with its own roles. */
+const ROLE_LABEL: Record<string, string> = { alpha: 'Alpha', beta: 'Beta' }
+
+/**
+ * Crisis's wording, verbatim in shape: one sentence per group.
+ *
+ * ⚠ WAITING ON WHOM, NOT HOW MANY. This used to read "waiting on 1 seat", which tells an
+ * instructor a group is stuck and nothing about what to do next. Crisis has always named
+ * the roles. Falls back to the count only if the server is older than the `waitingOnRoles`
+ * field — a deployed frontend can outrun a deployed function by a few minutes.
+ */
 function statusLine(g: DashboardGroup): string {
   if (!g.started) return 'not started'
   if (g.status === 'finished') return `finished — ${g.numRounds} rounds`
-  const waiting = (g.pending ?? 0) > 0 ? ` · waiting on ${g.pending} seat${g.pending === 1 ? '' : 's'}` : ''
+  const roles = g.waitingOnRoles ?? []
+  const waiting = roles.length > 0
+    ? ` · waiting on ${roles.map((r) => ROLE_LABEL[r] ?? r).join(', ')}`
+    : (g.pending ?? 0) > 0 ? ` · waiting on ${g.pending} seat${g.pending === 1 ? '' : 's'}` : ''
   return `Round ${g.round} of ${g.numRounds} · ${STAGE_LABEL[g.stage ?? ''] ?? g.stage}${waiting}`
 }
 
@@ -80,7 +92,6 @@ export default function GameControlStrip() {
   const [modeSaving, setModeSaving] = useState(false)
   const [groups, setGroups] = useState<DashboardGroup[]>([])
   const [error, setError] = useState<string | null>(null)
-
   /**
    * ⚠ HAS THIS PANEL EVER LOADED? "Missing token" is a NORMAL state, not a fault.
    *
@@ -99,13 +110,36 @@ export default function GameControlStrip() {
    */
   const [everLoaded, setEverLoaded] = useState(false)
   const failures = useRef(0)
+  /*
+    ⚠ THE SEAT PICTURE COMES FROM A SECOND CALL, IN BOTH MODES. `getGameDashboard` knows
+    the ROUND LOOP (round, stage, who owes) and nothing about seats; `getOnlineGroups`
+    knows the SEATS (occupants, bots, the no-group pool) and nothing about the round. One
+    row needs both, so the panel merges them by group_id — which is exactly what crisis
+    does with a poll plus a Firestore snapshot.
+
+    ⚠ "Online" IS A MISNOMER IN THAT CALLABLE'S NAME. `makeGetOnlineGroups` reads the group
+    and participant docs and is mode-agnostic; classroom groups are group docs too. It was
+    called only in online mode, which is why the classroom dashboard could never show a
+    seat count.
+  */
+  const [seats, setSeats] = useState<OnlineGroup[]>([])
+  const [pool, setPool] = useState<OnlineOccupant[]>([])
 
   /** Failures tolerated before the first success — about six seconds at POLL_MS. */
   const STARTUP_GRACE = 4
 
   const refresh = useCallback(async () => {
     try {
-      setGroups((await getGameDashboard()).groups ?? [])
+      // ⚠ SETTLED, NOT all() — the seat call failing must not blank the round status.
+      // The panel degrades to crisis's classroom look (no seat picture) instead of
+      // reporting the whole dashboard as broken.
+      const [dash, online] = await Promise.allSettled([getGameDashboard(), getOnlineGroups()])
+      if (dash.status === 'rejected') throw dash.reason
+      setGroups(dash.value.groups ?? [])
+      if (online.status === 'fulfilled') {
+        setSeats(online.value.groups ?? [])
+        setPool(online.value.no_group ?? [])
+      }
       setError(null)
       setEverLoaded(true)
       failures.current = 0
@@ -131,6 +165,52 @@ export default function GameControlStrip() {
   const neverStartedStudents = notStarted * SEATS_PER_GROUP
 
   const anyStarted = groups.some((g) => g.started)
+
+  const seatsById = useMemo(() => new Map(seats.map((s) => [s.group_id, s])), [seats])
+
+  /*
+    ⚠ DESTINATIONS INCLUDE FULL-WITH-A-BOT GROUPS — crisis's §O2.5B rule. A group at 2/2
+    where one seat is a robot is the BEST destination for a stranded student: the move
+    evicts the bot and gives them a human partner. Excluding it (the obvious reading of
+    "free seats") leaves a latecomer unplaceable in a class where every group is nominally
+    full, which at two seats per group is most of them.
+  */
+  const destinations = useMemo(
+    () => seats
+      .filter((s) => !s.started && (s.free_seats > 0 || s.occupants.some((o) => o.is_bot)))
+      .map((s) => ({
+        id: s.group_id,
+        number: s.group_number ?? null,
+        replacesBot: s.free_seats === 0,
+      })),
+    [seats],
+  )
+
+  const place = async (participantId: string, dest: string) => {
+    setError(null)
+    try { await moveSeat(participantId, dest === 'new' ? 'new' : dest); await refresh() }
+    catch (e) { setError(`Place: ${e instanceof Error ? e.message : 'failed'}`) }
+  }
+
+  const rows: GroupsPanelRow[] = groups.map((g) => {
+    const s = seatsById.get(g.group_id)
+    const bots = s?.occupants.filter((o) => o.is_bot).length ?? 0
+    return {
+      key: g.group_id,
+      number: g.groupNumber,
+      status: statusLine(g),
+      live: g.started && g.status !== 'finished',
+      filled: s ? s.occupants.length : undefined,
+      seatCount: s ? (s.seat_count ?? SEATS_PER_GROUP) : undefined,
+      bots,
+      // Started == seats locked. There is no separate lock in this game: opening round 1
+      // is what freezes membership, so one flag serves both.
+      locked: g.started,
+      actions: s && !g.started && s.free_seats > 0
+        ? <TopUp groupId={g.group_id} seats={s.free_seats} onDone={refresh} onError={setError} />
+        : undefined,
+    }
+  })
 
   /*
     ── SESSION MODE — THE CONTROL THAT SWITCHES THE WHOLE SESSION ──
@@ -191,78 +271,102 @@ export default function GameControlStrip() {
       </div>
     </div>
 
-    <div data-testid="game-control-strip"
-      style={{ margin: '0 0 1.5rem', padding: '0.75rem 1rem', border: `1px solid ${colors.borderMid}`, borderRadius: 8, background: colors.surfaceSubtle, fontFamily: typography.fontFamily }}>
+    {/*
+      ⚠ THE PANEL'S PROPORTIONS ARE game-ui's, NOT THIS FILE'S. Every padding, gap, font
+      size and row rule lives in GroupsPanel, copied from crisis. This file used to declare
+      them itself — and they were RIGHT, which is why "restyle this game" was the wrong
+      diagnosis: the row was crisis's height while carrying a third of crisis's
+      information, and in online mode a SECOND group list rendered underneath it. Density
+      is what a row carries times how many rows there are.
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: spacing.gapMd, marginBottom: spacing.gapSm, flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 700, fontSize: '1.05rem' }}>Groups</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: spacing.gapMd }}>
+      ⚠ NO PER-GROUP START BUTTON, AND DO NOT ADD ONE BACK. It looks like the obvious
+      escape hatch for the group that was not ready when the class began — but "Start
+      class" already IS that escape hatch. It is re-pressable by design:
+      `makeStartAllGroups` skips every group already running and every group still short a
+      seat, and opens only the ones that have become ready since. A second control that
+      opens ONE group is a second path into the same state with none of those guards.
+    */}
+    <GroupsPanel
+      testId="game-control-strip"
+      rows={rows}
+      noGroup={pool.map((p) => ({ participantId: p.participant_id, name: p.display_name }))}
+      destinations={destinations}
+      onPlace={place}
+      headerActions={
+        <>
           {!online && groups.length > 0 && <StartClass readyCount={notStarted} onDone={refresh} />}
           {online && (
             <span data-testid="online-autostart-note" style={{ fontSize: typography.sizeXs, color: colors.textSecondary }}>
               Online — groups start automatically as their seats arrive.
             </span>
           )}
-        </div>
-      </div>
-
-      {/*
-        ⚠ THE GRADING CONSEQUENCE, SHOWN BEFORE IT IS LOCKED IN. Group membership means
-        participation: a student in a group that never started is still scored as a
-        participant. That is the instructor's rule — ungrouping is how a no-show is
-        declared — but a forgotten ungroup is silent, so it is said here and on finalize.
-      */}
-      {neverStartedStudents > 0 && groups.length > 0 && (
-        <p data-testid="never-started-warning"
-          style={{ margin: `0 0 ${spacing.gapSm}`, padding: spacing.gapSm, borderRadius: 4, fontSize: typography.sizeSm,
-                   background: '#fef3c7', border: '1px solid #f59e0b' }}>
-          <strong>{notStarted} group{notStarted === 1 ? '' : 's'} not started</strong> — {neverStartedStudents} student
-          {neverStartedStudents === 1 ? '' : 's'}. They will be scored as <strong>participants</strong> unless you
-          ungroup them first. Ungrouped students score −2 and are left out of the class average.
-        </p>
-      )}
-
-      {!everLoaded && !error ? (
-        <div data-testid="control-strip-loading" style={{ fontSize: typography.sizeSm, color: colors.textSecondary }}>
-          Connecting…
-        </div>
-      ) : groups.length === 0 ? (
-        <div style={{ fontSize: typography.sizeSm, color: colors.textSecondary }}>
-          {online ? `Press “${GROUP_BUTTON_LABEL}” to form groups.` : 'Match students into groups to begin.'}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: spacing.gapSm }}>
-          {groups.map((g) => (
-            <div key={g.group_id} data-testid={`group-row-${g.groupNumber}`}
-              style={{ display: 'flex', alignItems: 'center', gap: spacing.gapMd, paddingBottom: '0.4rem', borderBottom: `1px solid ${colors.borderFaint}`, flexWrap: 'wrap' }}>
-              <span style={{ minWidth: 70, fontWeight: 600 }}>Group {g.groupNumber}</span>
-              <span style={{ fontSize: typography.sizeSm, color: g.started && g.status !== 'finished' ? colors.successText : colors.textSecondary }}>
-                {g.started && g.status !== 'finished' && '● '}{statusLine(g)}
-              </span>
-              {/*
-                ⚠ NO PER-GROUP START BUTTON, AND DO NOT ADD ONE BACK.
-                It looks like the obvious escape hatch for the group that was not ready
-                when the class began — but "Start class" already IS that escape hatch.
-                It is re-pressable by design: `makeStartAllGroups` skips every group that
-                is already running (`already_running`) and every group still short a seat
-                (`skipped_short`), and opens only the ones that have become ready since.
-                Pressing it again after a latecomer arrives starts exactly that group and
-                touches nothing else. A second control that opens ONE group is a second
-                path into the same state with none of those guards.
-              */}
-            </div>
-          ))}
-        </div>
-      )}
-
+        </>
+      }
+      emptyMessage={
+        !everLoaded && !error
+          ? <span data-testid="control-strip-loading">Connecting…</span>
+          /* ⚠ The label is IMPORTED, not retyped — this sentence told instructors to
+             press a button that did not exist for the whole of slices 1–3. */
+          : online ? `Press “${GROUP_BUTTON_LABEL}” to form groups.`
+          : 'Match students into groups to begin.'
+      }
+      footer={
+        <>
+          {/*
+            ⚠ THE GRADING CONSEQUENCE, SHOWN BEFORE IT IS LOCKED IN. Group membership means
+            participation: a student in a group that never started is still scored as a
+            participant. That is the instructor's rule — ungrouping is how a no-show is
+            declared — but a forgotten ungroup is silent, so it is said here and on finalize.
+          */}
+          {neverStartedStudents > 0 && groups.length > 0 && (
+            <p data-testid="never-started-warning"
+              style={{ margin: `${spacing.gapMd} 0 0`, padding: spacing.gapSm, borderRadius: 4, fontSize: typography.sizeSm,
+                       background: '#fef3c7', border: '1px solid #f59e0b' }}>
+              <strong>{notStarted} group{notStarted === 1 ? '' : 's'} not started</strong> — {neverStartedStudents} student
+              {neverStartedStudents === 1 ? '' : 's'}. They will be scored as <strong>participants</strong> unless you
+              ungroup them first. Ungrouped students score −2 and are left out of the class average.
+            </p>
+          )}
+          {error && <p role="alert" data-testid="control-error" style={{ color: '#b91c1c', fontSize: typography.sizeXs, margin: `${spacing.gapSm} 0 0` }}>{error}</p>}
+        </>
+      }
+    >
+      {/* ⚠ ONLINE HAS NO "Match Now" — it pre-groups the roster instead. These are the
+          controls that make an online session runnable at all. The panel now renders the
+          group list and the no-group pool, so this is BUTTONS ONLY — it used to repeat
+          both, which is where the extra height came from.
+          ⚠ BOUNDED. This panel blanked the whole production dashboard once; a panel
+          that crashes must degrade to a reportable message, not take the page with it. */}
       {online && (
         <PanelBoundary name="Online grouping">
           <OnlineMatchControl onChanged={refresh} />
         </PanelBoundary>
       )}
-
-      {error && <p role="alert" data-testid="control-error" style={{ color: '#b91c1c', fontSize: typography.sizeXs, margin: `${spacing.gapSm} 0 0` }}>{error}</p>}
-    </div>
+    </GroupsPanel>
     </>
+  )
+}
+
+/**
+ * Fill this group's empty seats with robots. crisis's per-group action, at two seats.
+ * ⚠ Styling is the panel's — this is a plain button in a slot, deliberately carrying no
+ * padding or font size of its own beyond the sizeXs every control on these rows uses.
+ */
+function TopUp({
+  groupId, seats, onDone, onError,
+}: { groupId: string; seats: number; onDone: () => void; onError: (m: string) => void }) {
+  const [busy, setBusy] = useState(false)
+  return (
+    <button
+      data-testid={`strip-fill-${groupId}`}
+      disabled={busy}
+      style={{ fontSize: typography.sizeXs }}
+      onClick={async () => {
+        setBusy(true)
+        try { await topUpGroupWithBots(groupId); onDone() }
+        catch (e) { onError(`Fill: ${e instanceof Error ? e.message : 'failed'}`) }
+        setBusy(false)
+      }}
+    >Fill {seats} seat{seats === 1 ? '' : 's'} with bots</button>
   )
 }
